@@ -1,5 +1,6 @@
 For Customers:
 -Create a new account and log in
+
 -Check balance
 -Transfer money to other customers
 -Apply for Loans and Fixed Deposits (FD)
