@@ -1,0 +1,125 @@
+/* Features Section */
+.features-section {
+  padding: 50px 20px;
+  background-color: #f5f5f5;
+  text-align: center;
+}
+
+.section-title h2 {
+  font-size: 3rem;
+  color: #333;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  position: relative;
+  display: inline-block;
+  animation: floatEffect 2s ease-in-out infinite;
+}
+
+.three-d-effect {
+  text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.3), -2px -2px 10px rgba(255, 255, 255, 0.6);
+}
+
+/* Adding a floating effect to the section title */
+@keyframes floatEffect {
+  0% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* Slider Container */
+.slider-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 30px;
+}
+
+/* Feature Card Style */
+.feature-card {
+  background-color: #ffffff;
+  border-radius: 10px;
+  padding: 20px;
+  width: 80%;
+  max-width: 400px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  box-shadow: 0 6px 10px rgba(0, 0, 0, 0.15);
+  transform: perspective(500px) rotateY(0deg);
+  animation: cardEffect 1.5s ease-in-out infinite;
+}
+
+.feature-card:hover {
+  transform: translateY(-10px) rotateY(15deg);
+  box-shadow: 0 12px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Adding a 3D effect */
+@keyframes cardEffect {
+  0% {
+    transform: perspective(500px) rotateY(0deg);
+  }
+  50% {
+    transform: perspective(500px) rotateY(10deg);
+  }
+  100% {
+    transform: perspective(500px) rotateY(0deg);
+  }
+}
+
+.feature-card h3 {
+  font-size: 1.8rem;
+  color: #007BFF;
+  margin-bottom: 15px;
+}
+
+.feature-card p {
+  font-size: 1.2rem;
+  color: #555;
+  line-height: 1.5;
+}
+
+/* Footer Section */
+.footer-section {
+  background-color: #333;
+  color: #fff;
+  padding: 40px 20px;
+}
+
+.footer-container {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.footer-column {
+  width: 48%;
+  margin-bottom: 20px;
+}
+
+.footer-column h4 {
+  font-size: 1.5rem;
+  margin-bottom: 10px;
+}
+
+.footer-column p {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+@media screen and (max-width: 768px) {
+  .footer-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .footer-column {
+    width: 100%;
+    text-align: center;
+  }
+}

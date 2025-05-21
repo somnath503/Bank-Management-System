@@ -1,0 +1,112 @@
+/* Overall Login Container */
+.login-container {
+  background-color: black;
+  color: red;
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+
+/* Heading Styling */
+h2.text-center {
+  font-size: 32px;
+  color: red;
+  margin-bottom: 30px;
+  text-transform: uppercase;
+  font-weight: bold;
+}
+
+/* Form Styling */
+form {
+  width: 100%;
+  max-width: 400px;
+  padding: 20px;
+  background-color: #111;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+label {
+  font-size: 14px;
+  color: red;
+  margin-bottom: 5px;
+  display: block;
+}
+
+/* Input Field Styling */
+input.form-control {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid red;
+  border-radius: 5px;
+  background-color: #222;
+  color: red;
+  font-size: 16px;
+  outline: none;
+}
+
+input.form-control:focus {
+  border-color: #ff4444;
+  background-color: #333;
+}
+
+input::placeholder {
+  color: rgba(255, 0, 0, 0.7);
+}
+
+/* Button Styling */
+button.btn {
+  padding: 12px;
+  font-size: 16px;
+  font-weight: bold;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 0.3s ease, transform 0.2s;
+}
+
+button.btn-primary {
+  background-color: red;
+  color: black;
+}
+
+button.btn-primary:hover {
+  background-color: darkred;
+  transform: scale(1.05);
+}
+
+button.btn-success {
+  background-color: green;
+  color: black;
+}
+
+button.btn-success:hover {
+  background-color: darkgreen;
+  transform: scale(1.05);
+}
+
+/* Button Group Styling */
+.button-group {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* Additional styling for larger screens */
+@media (min-width: 768px) {
+  .login-container {
+    padding: 40px;
+  }
+
+  .form-group {
+    margin-bottom: 25px;
+  }
+}

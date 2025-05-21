@@ -1,0 +1,58 @@
+/* src/styles/global.css */
+
+/* Import Google Font (Roboto is standard for MUI) */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Roboto', sans-serif;
+  /* background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab); */
+  /* More subtle gradient */
+   background: linear-gradient(backgroundColor'#ffffff');
+  background-size: 400% 400%;
+  animation: gradientShift 18s ease infinite;
+  color: #333;
+  /* Ensure content scrolls correctly */
+  height: 100%;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+}
+
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+/* Basic reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+/* Ensure the root element takes full height */
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Style the main application container (adjust if your App structure differs) */
+/* This selector might need adjustment based on how App.js renders */
+/* With CRA, #root directly contains the App component usually */
+/* #root > div { ... } might not be needed or should target differently */
+/* We'll rely on the structure in App.js using Box for layout */
+
+
+/* Link styling */
+a {
+  text-decoration: none;
+  color: inherit; /* Inherit color from parent */
+}
+
+/* Add any other global base styles here */

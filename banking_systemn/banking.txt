@@ -1,0 +1,4467 @@
+
+--- main\java\com\Banking_Somnath\banking_systemn\BankingSystemnApplication.java ---
+package com.Banking_Somnath.banking_systemn;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class BankingSystemnApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(BankingSystemnApplication.class, args);
+	}
+
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\config\AdminInitializer.java ---
+// --- main\java\com\Banking_Somnath\banking_systemn\config\AdminInitializer.java ---
+package com.Banking_Somnath.banking_systemn.config; // Ensure package is correct
+
+
+import com.Banking_Somnath.banking_systemn.model.Customer; // Ensure this import is correct
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository; // Ensure this import is correct
+import org.springframework.boot.CommandLineRunner; // Ensure this import is correct
+import org.springframework.context.annotation.Bean; // Ensure this import is correct
+import org.springframework.context.annotation.Configuration; // Ensure this import is correct
+import org.springframework.security.crypto.password.PasswordEncoder; // Ensure this import is correct
+
+@Configuration // Marks this class as a Spring configuration source
+public class AdminInitializer {
+
+    // Define a CommandLineRunner bean that will execute after the application context loads
+    @Bean
+    public CommandLineRunner createAdmin(CustomerRepository customerRepository, PasswordEncoder encoder) {
+        return args -> {
+            if (customerRepository.findByEmail("admin@example.com").isEmpty()) {
+                System.out.println("Creating initial admin user..."); // Log before creation
+
+                // Create a new Customer object for the admin
+                Customer admin = new Customer();
+
+                // Set essential details for the admin user
+                // Ensure these are unique in your database if running multiple times or with existing data
+                admin.setCustomerId("ADMIN-001"); // Unique identifier for login
+                admin.setEmail("admin@example.com"); // Unique email
+                admin.setMobileNumber("9999999999"); // Unique mobile number
+
+                // Set name and other personal details (can be placeholders for an admin)
+                admin.setFname("Admin-Somnath");
+                admin.setLname("Admin-Pandit");
+                admin.setFathername("System"); // Example placeholder
+                admin.setAddress("Head Office"); // Example placeholder
+                admin.setPincode("000000"); // Example placeholder
+                admin.setDob(java.time.LocalDate.of(2000, 1, 1)); // Example DOB
+
+                // Securely hash the admin's password using the injected PasswordEncoder
+                admin.setPassword(encoder.encode("admin123")); // HASH the password
+
+                // Set banking details (placeholders for admin - might not need full details)
+                admin.setAccountNumber("000000000001"); // Unique account number
+                admin.setIfsCode("ADMINIFSC"); // Example IFSC
+                admin.setBranchCode("ADMINBR"); // Example Branch Code
+                admin.setBalance(0.0); // Admin might start with zero balance
+
+                // *** FIX ***: Use the correct setter names from your Customer model (setIsApproved, setIsAdmin)
+                admin.setApproved(true); // <<< Set this to true so the admin user is 'enabled' for login
+                admin.setAdmin(true);   // <<< Set this to true to grant the ROLE_ADMIN authority
+                // *** END FIX ***
+
+                // Save the fully configured admin user to the database
+                customerRepository.save(admin);
+                System.out.println("✅ Admin user 'admin@example.com' (ID: ADMIN-001) inserted successfully.");
+            }
+            else {
+                System.out.println("Admin user 'admin@example.com' already exists. Skipping initialization."); // Log if admin already exists
+            }
+        };
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\config\SecurityConfig.java ---
+// --- main\java\com\Banking_Somnath\banking_systemn\config\SecurityConfig.java ---
+package com.Banking_Somnath.banking_systemn.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.Arrays;
+import java.util.List;
+
+import static org.springframework.security.config.Customizer.withDefaults;
+
+@Configuration
+@EnableWebSecurity
+@EnableMethodSecurity // Keep for potential future @PreAuthorize use
+public class SecurityConfig {
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(CsrfConfigurer::disable)
+                .authorizeHttpRequests(auth -> auth
+                        // Public endpoints
+                        .requestMatchers("/register", "/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/apply-for-job").permitAll() // Public job application
+
+                        // Admin endpoints (Customer Management & Job Applications)
+                        .requestMatchers("/admin/pending", "/admin/approve/**", "/admin/reject/**").hasRole("ADMIN")
+                        .requestMatchers("/admin/applications/**").hasRole("ADMIN") // Covers list, detail, schedule, reject, hire
+                        .requestMatchers("/admin/**").hasRole("ADMIN") // Catch-all for any other /admin paths
+                        .requestMatchers("/admin/fd/**").hasRole("ADMIN")
+                        .requestMatchers("/admin/loan/**").hasRole("ADMIN")
+                        // Employee endpoints (Customer Financial Actions)
+                        // *** MODIFIED: Allow both EMPLOYEE and ADMIN ***
+                        .requestMatchers("/employee/**").hasAnyRole("EMPLOYEE", "ADMIN")
+
+                        // Authenticated Customer endpoints
+                        .requestMatchers(HttpMethod.GET, "/check-balance").authenticated() // Customer checking own balance
+                        .requestMatchers(HttpMethod.POST, "/transfer").authenticated()     // Customer transferring own money
+                        .requestMatchers(HttpMethod.GET, "/transactions/download").hasAnyRole("USER", "EMPLOYEE", "ADMIN")// Customer downloading own history
+                        .requestMatchers("/fd/apply", "/fd/my-fds").authenticated()
+                        .requestMatchers("/loan/apply").authenticated()
+                        .requestMatchers("/loan/my-loans").authenticated()
+                        .anyRequest().authenticated()
+                )
+                .httpBasic(withDefaults()); // Use HTTP Basic for simplicity here
+
+        return http.build();
+    }
+
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(List.of("http://localhost:3000"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Cache-Control", "Content-Type"));
+        configuration.setAllowCredentials(true);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\controller\AdminController.java ---
+package com.Banking_Somnath.banking_systemn.controller;
+
+import com.Banking_Somnath.banking_systemn.dto.FixedDepositAdminViewDto;
+import com.Banking_Somnath.banking_systemn.model.*;
+import com.Banking_Somnath.banking_systemn.request.ApproveLoanRequest;
+import com.Banking_Somnath.banking_systemn.request.RejectApplicationRequest;
+import com.Banking_Somnath.banking_systemn.request.RejectRequest;
+import com.Banking_Somnath.banking_systemn.request.ScheduleInterviewRequest;
+import com.Banking_Somnath.banking_systemn.service.AdminService;
+import com.Banking_Somnath.banking_systemn.service.FixedDepositService;
+import com.Banking_Somnath.banking_systemn.service.LoanService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.security.Principal;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/admin")
+public class AdminController {
+
+
+    @Autowired
+    private FixedDepositService fixedDepositService;
+
+
+    private static final Logger log = LoggerFactory.getLogger(JobApplicationController.class);
+
+
+    @Autowired
+    private LoanService loanService;
+
+    @Autowired
+    private AdminService adminService;
+
+    @GetMapping("/pending")
+    public ResponseEntity<List<Customer>> viewPendingRegistrations() {
+        List<Customer> pendingCustomers = adminService.findPendingRegistrations();
+        return ResponseEntity.ok(pendingCustomers);
+    }
+
+    @PostMapping("/approve/{customerId}")
+    public ResponseEntity<String> approveRegistration(@PathVariable String customerId) {
+        String result = adminService.approveRegistration(customerId);
+        if (result.contains("Customer not found")) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        } else if (result.contains("already approved")) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(result);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/reject/{customerId}")
+    public ResponseEntity<String> rejectRegistration(@PathVariable String customerId) {
+        String result = adminService.rejectRegistration(customerId);
+        if (result.contains("Customer not found")) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(result);
+        }
+        return ResponseEntity.ok(result);
+    }
+
+    // new section for employee
+
+    @GetMapping("/applications")
+    public ResponseEntity<List<JobApplication>> getAllApplications() {
+        List<JobApplication> applications = adminService.getAllJobApplications();
+        return ResponseEntity.ok(applications);
+    }
+
+    @GetMapping("/applications/{appId}")
+    public ResponseEntity<JobApplication> getApplicationDetails(@PathVariable Long appId) {
+        return adminService.getJobApplicationDetails(appId)
+                .map(ResponseEntity::ok) // If found, wrap in 200 OK
+                .orElse(ResponseEntity.notFound().build()); // If not found, return 404
+    }
+
+    @PostMapping("/applications/{appId}/schedule-interview")
+    public ResponseEntity<?> scheduleInterview(
+            @PathVariable Long appId,
+            @RequestBody ScheduleInterviewRequest request, // Use the DTO
+            Principal principal) { // Get the logged-in admin
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Admin user not authenticated.");
+        }
+        try {
+            JobApplication updatedApp = adminService.scheduleJobInterview(appId, request.getInterviewDate(), principal.getName());
+            return ResponseEntity.ok(updatedApp);
+        } catch (RuntimeException e) {
+            // Catch exceptions from service (e.g., app not found)
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e){
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred.");
+        }
+    }
+
+    @PostMapping("/applications/{appId}/reject")
+    public ResponseEntity<?> rejectApplication(
+            @PathVariable Long appId,
+            @RequestBody RejectApplicationRequest request, // Use the DTO
+            Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Admin user not authenticated.");
+        }
+        try {
+            JobApplication updatedApp = adminService.rejectJobApplication(appId, request.getReason(), principal.getName());
+            return ResponseEntity.ok(updatedApp);
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e){
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred.");
+        }
+    }
+
+    @PostMapping("/applications/{appId}/hire")
+    public ResponseEntity<?> hireApplicant(
+            @PathVariable Long appId,
+            Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Admin user not authenticated.");
+        }
+        try {
+            JobApplication updatedApp = adminService.hireApplicant(appId, principal.getName());
+            // Maybe return the updated application OR just a success message
+            return ResponseEntity.ok(updatedApp); // Returning updated app might be useful
+        } catch (RuntimeException e) {
+            // Catch specific errors like "already hired" or "email exists"
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
+        } catch (Exception e){
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("An unexpected error occurred during hiring process.");
+        }
+    }
+
+    @GetMapping("/loan/pending")
+    public ResponseEntity<List<LoanApplication>> viewPendingLoans() {
+        // Consider adding try-catch for robustness, although service might handle
+        try {
+            List<LoanApplication> pendingLoans = loanService.getPendingLoanApplications();
+            return ResponseEntity.ok(pendingLoans);
+        } catch (Exception e) {
+            log.error("Admin failed to fetch pending loans: {}", e.getMessage(), e);
+            // Return an empty list or an error response
+            // return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Collections.emptyList());
+            // For simplicity, rethrowing might be caught by a global handler if configured
+            throw new RuntimeException("Failed to fetch pending loans", e);
+        }
+    }
+
+    /**
+     * Endpoint for Admin to approve a specific loan application.
+     * Requires loan ID in path and approval details (amount, rate) in body.
+     */
+    @PostMapping("/loan/approve/{loanId}")
+    public ResponseEntity<?> approveLoanApplication(
+            @PathVariable Long loanId,
+            @RequestBody ApproveLoanRequest approveDetails, // Request body with approved amount/rate
+            Principal principal)
+    {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Admin not authenticated."));
+        }
+        String adminId = principal.getName(); // Get adminId from authenticated principal
+        try {
+            LoanApplication approvedLoan = loanService.approveLoan(loanId, adminId, approveDetails);
+            // Return success response with the updated loan application details
+            return ResponseEntity.ok(Map.of("success", true, "message", "Loan application " + loanId + " approved successfully.", "loanApplication", approvedLoan));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // Handle cases like wrong status or invalid approval data
+            log.warn("Loan approval failed for ID {}: {}", loanId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            // Handle other errors like loan not found or DB issues
+            log.error("Error approving loan ID {}: {}", loanId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "Error approving loan: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Endpoint for Admin to reject a specific loan application.
+     * Requires loan ID in path and rejection reason in body.
+     */
+    @PostMapping("/loan/reject/{loanId}")
+    public ResponseEntity<?> rejectLoanApplication(
+            @PathVariable Long loanId,
+            @RequestBody RejectRequest rejectRequest, // Request body with reason
+            Principal principal)
+    {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Admin not authenticated."));
+        }
+        String adminId = principal.getName();
+        try {
+            LoanApplication rejectedLoan = loanService.rejectLoan(loanId, adminId, rejectRequest.getReason());
+            // Return success response with the updated loan application details
+            return ResponseEntity.ok(Map.of("success", true, "message", "Loan application " + loanId + " rejected successfully.", "loanApplication", rejectedLoan));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            // Handle cases like wrong status or missing reason
+            log.warn("Loan rejection failed for ID {}: {}", loanId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            // Handle other errors like loan not found or DB issues
+            log.error("Error rejecting loan ID {}: {}", loanId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "Error rejecting loan: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/fd/pending")
+    public ResponseEntity<?> viewPendingFixedDeposits() {
+        log.info("ADMIN API CALL: Fetching all pending FD applications.");
+        try {
+            // <<< CORRECTED: Call service method that returns DTOs >>>
+            List<FixedDepositAdminViewDto> pendingFdDtos = fixedDepositService.getPendingFdApplicationsForAdmin();
+            return ResponseEntity.ok(pendingFdDtos); // Return list of DTOs
+        } catch (Exception e) {
+            log.error("Admin error fetching pending FDs: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "Failed to fetch pending Fixed Deposit applications."));
+        }
+    }
+
+    /**
+     * Endpoint for Admin to approve a specific PENDING Fixed Deposit application.
+     * Requires FD ID in the path.
+     */
+    @PostMapping("/fd/approve/{fdId}")
+    public ResponseEntity<?> approveFixedDeposit(@PathVariable Long fdId, Principal principal) {
+        if (principal == null || principal.getName() == null) {
+            log.warn("FD Approve attempt by unauthenticated admin.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Admin not authenticated."));
+        }
+        String adminId = principal.getName();
+        log.info("ADMIN API CALL: Admin '{}' attempting to approve FD application ID: {}", adminId, fdId);
+        try {
+            // <<< CORRECTED: Call service method that returns DTO >>>
+            FixedDepositAdminViewDto approvedFdDto = fixedDepositService.approveFd(fdId, adminId);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Fixed Deposit application (ID: " + fdId + ") approved successfully and is now active.",
+                    "fixedDeposit", approvedFdDto // Send back the DTO
+            ));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("Admin FD approval validation failed for FD ID {}: {}", fdId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            log.error("Error during admin approval of FD ID {}: {}", fdId, e.getMessage(), e);
+            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("insufficient balance")) {
+                return ResponseEntity.status(HttpStatus.CONFLICT)
+                        .body(Map.of("success", false, "message", e.getMessage()));
+            }
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "An unexpected error occurred while approving the FD: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Endpoint for Admin to reject a specific PENDING FixedDeposit application.
+     * Requires FD ID in path and a rejection reason in the request body.
+     */
+    @PostMapping("/fd/reject/{fdId}")
+    public ResponseEntity<?> rejectFixedDeposit(@PathVariable Long fdId, @RequestBody RejectRequest rejectRequest, Principal principal) {
+        if (principal == null || principal.getName() == null) {
+            log.warn("FD Reject attempt by unauthenticated admin.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Admin not authenticated."));
+        }
+        String adminId = principal.getName();
+        log.info("ADMIN API CALL: Admin '{}' attempting to reject FD application ID: {} with reason: {}",
+                adminId, fdId, rejectRequest.getReason());
+        try {
+            // <<< CORRECTED: Call service method that returns DTO >>>
+            FixedDepositAdminViewDto rejectedFdDto = fixedDepositService.rejectFd(fdId, adminId, rejectRequest.getReason());
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Fixed Deposit application (ID: " + fdId + ") rejected successfully.",
+                    "fixedDeposit", rejectedFdDto // Send back the DTO
+            ));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            log.warn("Admin FD rejection validation failed for FD ID {}: {}", fdId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            log.error("Error during admin rejection of FD ID {}: {}", fdId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "An unexpected error occurred while rejecting the FD: " + e.getMessage()));
+        }
+    }
+
+
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\controller\CustomerController.java ---
+package com.Banking_Somnath.banking_systemn.controller;
+
+import com.Banking_Somnath.banking_systemn.dto.FixedDepositCustomerViewDto;
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.FixedDeposit;
+import com.Banking_Somnath.banking_systemn.model.LoanApplication;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.request.*;
+import com.Banking_Somnath.banking_systemn.response.BalanceResponse;
+import com.Banking_Somnath.banking_systemn.security.CustomUserDetailsService;
+import com.Banking_Somnath.banking_systemn.service.CustomerService;
+//import com.Banking_Somnath.banking_systemn.service.TransactionService;
+import com.Banking_Somnath.banking_systemn.service.FixedDepositService;
+import com.Banking_Somnath.banking_systemn.service.LoanService;
+import com.Banking_Somnath.banking_systemn.service.TransactionService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.bind.annotation.*;
+
+import java.security.Principal;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+@RestController
+//@CrossOrigin("http://localhost:3000")
+// somnath@2004 ->password
+public class CustomerController {
+
+    private static final Logger log = LoggerFactory.getLogger(JobApplicationController.class);
+
+    @Autowired
+    private FixedDepositService fixedDepositService;
+
+    @Autowired
+    CustomerService customerService;
+
+    @Autowired
+    TransactionService transactionService;
+
+    @Autowired
+    private CustomUserDetailsService userDetailsService; // For loading user data
+
+    @Autowired
+    CustomerRepository customerRepository;
+
+    @Autowired
+    private LoanService loanService;
+
+
+    @Autowired
+    private PasswordEncoder passwordEncoder; // For checking password hash
+
+
+    @PostMapping("/register")
+    public ResponseEntity<Customer> register(@RequestBody Customer customer) {
+        Customer registeredCustomer = customerService.register(customer);
+        return ResponseEntity.status(HttpStatus.CREATED).body(registeredCustomer);
+    }
+
+    // --- Part of CustomerController.java ---
+
+    // --- Login endpoint using Manual Authentication Checks ---
+    // --- CORRECTED /login endpoint using Manual Authentication Checks & Returning Role/ID ---
+    @PostMapping("/login")
+    public ResponseEntity<?> login(@RequestBody LoginRequest loginRequest) {
+        // --- Basic Request Body Validation ---
+        if (loginRequest.getPassword() == null || loginRequest.getPassword().isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", "Password is required."));
+        }
+        String identifier = loginRequest.getCustomerId(); // Prioritize customerId
+        if ((identifier == null || identifier.isEmpty()) && (loginRequest.getMobileNumber() == null || loginRequest.getMobileNumber().isEmpty())) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", "Either Customer ID or Mobile Number is required."));
+        }
+        if (identifier == null || identifier.isEmpty()) {
+            identifier = loginRequest.getMobileNumber(); // Fallback to mobile
+        }
+        if (identifier == null || identifier.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", "Login identifier is required."));
+        }
+
+        try {
+            // --- Manual Authentication Steps ---
+
+            // 1. Load User by identifier
+            UserDetails userDetails = userDetailsService.loadUserByUsername(identifier);
+
+            // 2. Check if account is enabled (isApproved || isAdmin)
+            if (!userDetails.isEnabled()) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Account is pending admin approval or disabled."));
+            }
+
+            // 3. Check if password matches the stored hash
+            if (!passwordEncoder.matches(loginRequest.getPassword(), userDetails.getPassword())) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Invalid Credentials.")); // Generic message
+            }
+
+            // --- Authentication Successful ---
+
+            // *** FIX: Extract role and customerId for the success response ***
+            String role = userDetails.getAuthorities().stream()
+                    .findFirst() // Get the first role (e.g., ROLE_ADMIN or ROLE_USER)
+                    .map(GrantedAuthority::getAuthority)
+                    .orElse("UNKNOWN_ROLE"); // Provide a default if somehow no role is assigned
+            // getUsername() from UserDetails is configured to return customerId in Customer.java
+            String authenticatedCustomerId = userDetails.getUsername();
+
+            // Return 200 OK success response WITH role and customerId
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Login successful!",
+                    "role", role,
+                    "customerId", authenticatedCustomerId
+            ));
+            // *** END FIX ***
+
+        } catch (UsernameNotFoundException e) {
+            // User identifier not found
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "Invalid Credentials.")); // Generic message
+        } catch (Exception e) {
+            // Catch any other unexpected errors
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "An unexpected error occurred during login: " + e.getMessage()));
+        }
+    }
+
+
+    @GetMapping("/check-balance")
+    public ResponseEntity<?> checkBalance() {
+//         Get the logged-in user's customerId from the SecurityContext
+        String customerId = getLoggedInCustomerId();
+        System.out.println("Checking balance for: " + customerId);
+//        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+//        String customerId = authentication.getName();
+//        System.out.println("Customer ID from security context: " + customerId);
+
+
+        if (customerId == null) {
+            return ResponseEntity.status(401).body("ERROR: User not logged in.");
+        }
+
+        // Call service to check balance
+        String balance = transactionService.getBalance(customerId);
+
+        if (balance.startsWith("ERROR")) {
+            return ResponseEntity.status(404).body(balance);
+        }
+
+        return ResponseEntity.ok(new BalanceResponse(true, balance));
+    }
+
+    private String getLoggedInCustomerId() {
+        // Get the logged-in user (assuming customerId is the username in Spring Security)
+        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        if (principal instanceof UserDetails) {
+            return ((UserDetails) principal).getUsername();
+        }
+        return null;
+    }
+
+    @PostMapping("/transfer") // This matches the endpoint your frontend calls
+    public ResponseEntity<?> performTransfer(@RequestBody TransferMoney transferRequest) {
+        String customerId = getLoggedInCustomerId(); // Get the ID of the logged-in sender
+
+        if (customerId == null) {
+            // For an actual application, consider how to provide feedback without server-side logs
+            // if direct client feedback is not enough.
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(new SimpleMessageResponse(false, "User not logged in or session expired. Please login again."));
+        }
+
+        // Password field is assumed to be removed from TransferMoney DTO and service logic.
+        // No logging of the request body here.
+
+        Optional<Customer> senderOpt = customerRepository.findByCustomerId(customerId);
+        if (senderOpt.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new SimpleMessageResponse(false, "Authenticated user account not found. Please contact support."));
+        }
+
+        // Call the transaction service to perform the transfer
+        // The transactionService.Transfer method and TransferMoney DTO
+        // should also be updated to not expect/use senderPassword.
+        String result = transactionService.Transfer(senderOpt.get(), transferRequest);
+
+        // Process the result from the service
+        if (result.startsWith("ERROR:")) {
+            String errorMessage = result.substring("ERROR:".length()).trim();
+            return ResponseEntity.badRequest().body(new SimpleMessageResponse(false, errorMessage));
+        }
+
+        return ResponseEntity.ok(new SimpleMessageResponse(true, result));
+    }
+
+    // Assuming SimpleMessageResponse class is defined like this, possibly in another file
+    // or as a static nested class if only used here.
+    public static class SimpleMessageResponse {
+        private boolean success;
+        private String message;
+
+        public SimpleMessageResponse(boolean success, String message) {
+            this.success = success;
+            this.message = message;
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    @GetMapping("/transactions/download")
+    public ResponseEntity<?> downloadTransactionHistory(
+            @RequestParam("startDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam("endDate") @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("User not authenticated.");
+        }
+        String customerId = principal.getName();
+        if (startDate == null || endDate == null) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Both start date and end date are required.");
+        }
+        if (startDate.isAfter(endDate)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Start date cannot be after end date.");
+        }
+
+        try {
+            // Call the service method with customerId and the date range
+            byte[] pdfBytes = transactionService.generateTransactionHistoryPdf(customerId, startDate, endDate);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_PDF);
+            String filename = String.format("transaction_history_%s_%s_to_%s.pdf",
+                    customerId,
+                    startDate.toString(),
+                    endDate.toString());
+            headers.setContentDispositionFormData("attachment", filename);
+            headers.setCacheControl("must-revalidate, post-check=0, pre-check=0");
+
+            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
+
+        } catch (RuntimeException e) {
+            // Catch specific exceptions like customer not found during generation if needed
+            e.printStackTrace();
+            // Provide a user-friendly error in the body
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error generating PDF: " + e.getMessage());
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Failed to generate PDF due to an unexpected error.");
+        }
+    }
+
+    // Simple response class for Transfer endpoint
+    public static class SimpleMessage {
+        private boolean success;
+        private String message;
+
+        public SimpleMessage(boolean success, String message) {
+            this.success = success;
+            this.message = message;
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+    }
+
+    @PostMapping("/loan/apply")
+    public ResponseEntity<?> applyForLoan(@RequestBody CreateLoanRequest loanRequest, Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "User not authenticated."));
+        }
+        String customerId = principal.getName(); // Get customerId from authenticated principal
+        try {
+            LoanApplication createdLoanApp = loanService.applyForLoan(customerId, loanRequest);
+            // Return success response with basic details
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "success", true,
+                    "message", "Loan application submitted successfully. Awaiting review.",
+                    "applicationId", createdLoanApp.getId(),
+                    "status", createdLoanApp.getStatus()
+            ));
+        } catch (IllegalArgumentException e) {
+            // Handle validation errors from the service
+            log.warn("Loan application validation failed for customer {}: {}", customerId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            // Handle other errors like customer not found or database issues
+            log.error("Error submitting loan application for customer {}: {}", customerId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "Error submitting loan application: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * Endpoint for a logged-in customer to view their own loan applications.
+     */
+    @GetMapping("/loan/my-loans")
+    public ResponseEntity<?> getMyLoanApplications(Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "User not authenticated."));
+        }
+        String customerId = principal.getName();
+        try {
+            List<LoanApplication> loanApps = loanService.getLoansByCustomer(customerId);
+            return ResponseEntity.ok(Map.of("success", true, "loanApplications", loanApps));
+        } catch (RuntimeException e) {
+            // Handle errors like customer not found during fetch
+            log.error("Error fetching loan applications for customer {}: {}", customerId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "Error fetching loan applications: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/fd/apply")
+    public ResponseEntity<?> applyForFixedDeposit(@RequestBody CreateFdRequest fdRequest, Principal principal) {
+        if (principal == null || principal.getName() == null) {
+            log.warn("FD Apply attempt by unauthenticated user.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", "User not authenticated. Please log in."));
+        }
+        String customerId = principal.getName();
+        log.info("API CALL: Customer '{}' applying for FD. Amount: ₹{}, Term: {} months",
+                customerId, fdRequest.getPrincipalAmount(), fdRequest.getTermInMonths());
+        try {
+            // <<< CORRECTED: Call service method that returns DTO >>>
+            FixedDepositCustomerViewDto createdFdDto = fixedDepositService.applyForFd(customerId, fdRequest);
+            // The applyForFd service method was already updated to return FixedDepositCustomerViewDto
+
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "success", true,
+                    "message", "Fixed Deposit application submitted successfully. It is now pending admin approval.",
+                    "applicationId", createdFdDto.getId(),
+                    "principalAmount", createdFdDto.getPrincipalAmount(),
+                    "termInMonths", createdFdDto.getTermInMonths(),
+                    "interestRate", createdFdDto.getInterestRate(), // Make sure DTO has this if needed here
+                    "status", createdFdDto.getStatus()
+            ));
+        } catch (IllegalArgumentException e) {
+            log.warn("FD application validation failed for customer '{}': {}", customerId, e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (RuntimeException e) {
+            log.error("Error during FD application for customer '{}': {}", customerId, e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "An unexpected error occurred while processing your FD application. Please try again later."));
+        }
+    }
+
+    // In CustomerController.java
+    @GetMapping("/fd/my-fds")
+    public ResponseEntity<?> getMyFixedDeposits(Principal principal) {
+        // 1. Authentication Check
+        if (principal == null || principal.getName() == null) {
+            log.warn("API CALL to /fd/my-fds by unauthenticated user.");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("success", false, "message", "User not authenticated. Please log in to view your Fixed Deposits."));
+        }
+
+        String customerId = principal.getName();
+        log.info("API CALL: Customer '{}' fetching their Fixed Deposits via /fd/my-fds.", customerId);
+
+        try {
+            // 2. Call Service Method that returns a List of DTOs
+            // This assumes fixedDepositService.getFdsByCustomerIdDto(customerId) correctly
+            // fetches entities and converts them to FixedDepositCustomerViewDto without lazy loading issues.
+            List<FixedDepositCustomerViewDto> fdsDtoList = fixedDepositService.getFdsByCustomerIdDto(customerId);
+
+            if (fdsDtoList == null) { // Should not happen if service returns empty list instead of null
+                log.error("Service returned null list of FDs for customer '{}'. This is unexpected.", customerId);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("success", false, "message", "An internal error occurred while fetching your Fixed Deposits."));
+            }
+
+            log.info("Successfully fetched {} Fixed Deposit DTOs for customer '{}'.", fdsDtoList.size(), customerId);
+            // 3. Successful Response with DTO list
+            return ResponseEntity.ok(Map.of("success", true, "fixedDeposits", fdsDtoList));
+
+        } catch (RuntimeException e) {
+            // This catches exceptions thrown from the service layer,
+            // e.g., "Customer not found" or database access issues.
+            log.error("Error fetching FDs for customer '{}': {}", customerId, e.getMessage(), e); // Log the full exception for debugging
+
+            String userMessage = "An error occurred while fetching your Fixed Deposits. Please try again later.";
+            if (e.getMessage() != null && e.getMessage().toLowerCase().contains("customer not found")) {
+                // More specific message if customer was not found (should ideally not happen for an authenticated user's own data)
+                userMessage = "Could not retrieve your Fixed Deposit details. User profile not found.";
+                return ResponseEntity.status(HttpStatus.NOT_FOUND) // Or INTERNAL_SERVER_ERROR
+                        .body(Map.of("success", false, "message", userMessage));
+            }
+
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", userMessage));
+        }
+
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\controller\EmployeeController.java ---
+package com.Banking_Somnath.banking_systemn.controller;
+
+import com.Banking_Somnath.banking_systemn.request.EmployeeActionRequest; // Assuming a combined request DTO
+import com.Banking_Somnath.banking_systemn.response.BalanceResponse; // Can reuse this
+import com.Banking_Somnath.banking_systemn.service.EmployeeService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+        import java.security.Principal; // To get the logged-in employee/admin ID
+import java.util.Map;
+
+@RestController
+@RequestMapping("/employee") // Base path for all employee actions
+public class EmployeeController {
+
+    @Autowired
+    private EmployeeService employeeService;
+
+    // Helper to get the logged-in username (employee/admin customerId)
+    private String getPerformingUsername(Principal principal) {
+        if (principal == null || principal.getName() == null) {
+            throw new SecurityException("User not authenticated."); // Should be caught by Spring Security ideally
+        }
+        return principal.getName();
+    }
+
+    @PostMapping("/deposit")
+    public ResponseEntity<?> performDeposit(@RequestBody EmployeeActionRequest request, Principal principal) {
+        try {
+            String performingUsername = getPerformingUsername(principal);
+            String result = employeeService.deposit(request.getTargetCustomerId(), request.getAmount(), performingUsername);
+
+            if (result.startsWith("ERROR:")) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", result.replace("ERROR: ", "")));
+            }
+            return ResponseEntity.ok(Map.of("success", true, "message", result));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "An unexpected error occurred during deposit."));
+        }
+    }
+
+    @PostMapping("/withdraw")
+    public ResponseEntity<?> performWithdrawal(@RequestBody EmployeeActionRequest request, Principal principal) {
+        try {
+            String performingUsername = getPerformingUsername(principal);
+            String result = employeeService.withdraw(request.getTargetCustomerId(), request.getAmount(), performingUsername);
+
+            if (result.startsWith("ERROR:")) {
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", result.replace("ERROR: ", "")));
+            }
+            return ResponseEntity.ok(Map.of("success", true, "message", result));
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "An unexpected error occurred during withdrawal."));
+        }
+    }
+
+    @GetMapping("/check-balance/{targetCustomerId}")
+    public ResponseEntity<?> checkCustomerBalance(@PathVariable String targetCustomerId, Principal principal) {
+        try {
+            String performingUsername = getPerformingUsername(principal);
+            String balance = employeeService.checkBalance(targetCustomerId, performingUsername);
+
+            if (balance.startsWith("ERROR:")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("success", false, "message", balance.replace("ERROR: ", "")));
+            }
+            // Reuse BalanceResponse or return a map
+            return ResponseEntity.ok(new BalanceResponse(true, balance));
+            // return ResponseEntity.ok(Map.of("success", true, "customerId", targetCustomerId, "balance", balance));
+
+        } catch (SecurityException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("success", false, "message", e.getMessage()));
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("success", false, "message", "An unexpected error occurred checking balance."));
+        }
+    }
+
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\controller\JobApplicationController.java ---
+package com.Banking_Somnath.banking_systemn.controller;
+
+import com.Banking_Somnath.banking_systemn.model.JobApplication;
+import com.Banking_Somnath.banking_systemn.request.JobApplicationRequest;
+import com.Banking_Somnath.banking_systemn.service.JobApplicationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping; // Add RequestMapping if needed for base path
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map; // For simple message responses
+
+@RestController
+public class JobApplicationController {
+
+    private static final Logger log = LoggerFactory.getLogger(JobApplicationController.class);
+
+    @Autowired
+    private JobApplicationService jobApplicationService;
+
+    // Endpoint for public job application submissions
+    @PostMapping("/apply-for-job") // Path matches SecurityConfig permitAll rule
+    public ResponseEntity<?> submitJobApplication(
+            // Add @Valid here if using validation annotations in the Request DTO
+            @RequestBody JobApplicationRequest request
+    ) {
+        log.info("Received job application submission from email: {}", request.getApplicantEmail());
+        try {
+            // Basic validation (enhance with @Valid if needed)
+            if (request.getApplicantFirstName() == null || request.getApplicantFirstName().isBlank() ||
+                    request.getApplicantLastName() == null || request.getApplicantLastName().isBlank() ||
+                    request.getApplicantEmail() == null || request.getApplicantEmail().isBlank() ||
+                    request.getApplicantPhone() == null || request.getApplicantPhone().isBlank() ||
+                    request.getQualifications() == null || request.getQualifications().isBlank() ||
+                    request.getDesiredRole() == null || request.getDesiredRole().isBlank()) {
+                log.warn("Job application validation failed: Missing required fields.");
+                return ResponseEntity.badRequest().body(Map.of("success", false, "message", "Please fill in all required fields."));
+            }
+
+            JobApplication submittedApplication = jobApplicationService.submitApplication(request);
+            log.info("Job application submitted successfully with ID: {}", submittedApplication.getId());
+
+            // Return a simple success message
+            return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                    "success", true,
+                    "message", "Application submitted successfully!"
+                    // "applicationId": submittedApplication.getId() // Optional: return ID
+            ));
+
+        } catch (Exception e) {
+            log.error("Error submitting job application for email {}: {}", request.getApplicantEmail(), e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("success", false, "message", "An error occurred while submitting your application."));
+        }
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\dto\CustomerBasicInfoDto.java ---
+package com.Banking_Somnath.banking_systemn.dto;
+
+public class CustomerBasicInfoDto {
+    private String customerId;
+    private String fullName;
+    private String mobileNumber;
+    private String email;
+
+    // Default constructor for Jackson
+    public CustomerBasicInfoDto() {
+    }
+
+    public CustomerBasicInfoDto(String customerId, String fullName, String mobileNumber, String email) {
+        this.customerId = customerId;
+        this.fullName = fullName;
+        this.mobileNumber = mobileNumber;
+        this.email = email;
+    }
+
+    // Getters and Setters
+    public String getCustomerId() { return customerId; }
+    public void setCustomerId(String customerId) { this.customerId = customerId; }
+    public String getFullName() { return fullName; }
+    public void setFullName(String fullName) { this.fullName = fullName; }
+    public String getMobileNumber() { return mobileNumber; }
+    public void setMobileNumber(String mobileNumber) { this.mobileNumber = mobileNumber; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\dto\FixedDepositAdminViewDto.java ---
+package com.Banking_Somnath.banking_systemn.dto;
+import com.Banking_Somnath.banking_systemn.model.FixedDepositStatus;
+import java.time.LocalDateTime;
+
+public class FixedDepositAdminViewDto {
+    private Long id;
+    private CustomerBasicInfoDto customerInfo; // Contains customerId, fullName, etc.
+    private Double principalAmount;
+    private Integer termInMonths;
+    private Double interestRate;
+    private LocalDateTime applicationDate;
+    private FixedDepositStatus status;
+    private String sourceAccountNumber;
+
+    // Constructor
+    public FixedDepositAdminViewDto(Long id, CustomerBasicInfoDto customerInfo,
+                                    Double principalAmount, Integer termInMonths, Double interestRate,
+                                    LocalDateTime applicationDate, FixedDepositStatus status, String sourceAccountNumber) {
+        this.id = id;
+        this.customerInfo = customerInfo;
+        this.principalAmount = principalAmount;
+        this.termInMonths = termInMonths;
+        this.interestRate = interestRate;
+        this.applicationDate = applicationDate;
+        this.status = status;
+        this.sourceAccountNumber = sourceAccountNumber;
+    }
+    // Getters and Setters...
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public CustomerBasicInfoDto getCustomerInfo() { return customerInfo; }
+    public void setCustomerInfo(CustomerBasicInfoDto customerInfo) { this.customerInfo = customerInfo; }
+    public Double getPrincipalAmount() { return principalAmount; }
+    public void setPrincipalAmount(Double principalAmount) { this.principalAmount = principalAmount; }
+    public Integer getTermInMonths() { return termInMonths; }
+    public void setTermInMonths(Integer termInMonths) { this.termInMonths = termInMonths; }
+    public Double getInterestRate() { return interestRate; }
+    public void setInterestRate(Double interestRate) { this.interestRate = interestRate; }
+    public LocalDateTime getApplicationDate() { return applicationDate; }
+    public void setApplicationDate(LocalDateTime applicationDate) { this.applicationDate = applicationDate; }
+    public FixedDepositStatus getStatus() { return status; }
+    public void setStatus(FixedDepositStatus status) { this.status = status; }
+    public String getSourceAccountNumber() { return sourceAccountNumber; }
+    public void setSourceAccountNumber(String sourceAccountNumber) { this.sourceAccountNumber = sourceAccountNumber; }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\dto\FixedDepositCustomerViewDto.java ---
+package com.Banking_Somnath.banking_systemn.dto; // Or your DTO package
+
+import com.Banking_Somnath.banking_systemn.model.FixedDepositStatus;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+public class FixedDepositCustomerViewDto {
+    private Long id;
+    private Double principalAmount;
+    private Double interestRate;
+    private Integer termInMonths;
+    private LocalDate startDate;
+    private LocalDate maturityDate;
+    private Double maturityAmount;
+    private FixedDepositStatus status;
+    private LocalDateTime applicationDate;
+    private String sourceAccountNumber;
+    private String rejectionReason; // Only relevant if rejected
+
+    // Constructors, Getters, and Setters
+
+    public FixedDepositCustomerViewDto() {
+    }
+
+    public FixedDepositCustomerViewDto(Long id, Double principalAmount, Double interestRate, Integer termInMonths,
+                                       LocalDate startDate, LocalDate maturityDate, Double maturityAmount,
+                                       FixedDepositStatus status, LocalDateTime applicationDate, String sourceAccountNumber,
+                                       String rejectionReason) {
+        this.id = id;
+        this.principalAmount = principalAmount;
+        this.interestRate = interestRate;
+        this.termInMonths = termInMonths;
+        this.startDate = startDate;
+        this.maturityDate = maturityDate;
+        this.maturityAmount = maturityAmount;
+        this.status = status;
+        this.applicationDate = applicationDate;
+        this.sourceAccountNumber = sourceAccountNumber;
+        this.rejectionReason = rejectionReason;
+    }
+
+    // --- Getters ---
+    public Long getId() { return id; }
+    public Double getPrincipalAmount() { return principalAmount; }
+    public Double getInterestRate() { return interestRate; }
+    public Integer getTermInMonths() { return termInMonths; }
+    public LocalDate getStartDate() { return startDate; }
+    public LocalDate getMaturityDate() { return maturityDate; }
+    public Double getMaturityAmount() { return maturityAmount; }
+    public FixedDepositStatus getStatus() { return status; }
+    public LocalDateTime getApplicationDate() { return applicationDate; }
+    public String getSourceAccountNumber() { return sourceAccountNumber; }
+    public String getRejectionReason() { return rejectionReason; }
+
+    // --- Setters ---
+    public void setId(Long id) { this.id = id; }
+    public void setPrincipalAmount(Double principalAmount) { this.principalAmount = principalAmount; }
+    public void setInterestRate(Double interestRate) { this.interestRate = interestRate; }
+    public void setTermInMonths(Integer termInMonths) { this.termInMonths = termInMonths; }
+    public void setStartDate(LocalDate startDate) { this.startDate = startDate; }
+    public void setMaturityDate(LocalDate maturityDate) { this.maturityDate = maturityDate; }
+    public void setMaturityAmount(Double maturityAmount) { this.maturityAmount = maturityAmount; }
+    public void setStatus(FixedDepositStatus status) { this.status = status; }
+    public void setApplicationDate(LocalDateTime applicationDate) { this.applicationDate = applicationDate; }
+    public void setSourceAccountNumber(String sourceAccountNumber) { this.sourceAccountNumber = sourceAccountNumber; }
+    public void setRejectionReason(String rejectionReason) { this.rejectionReason = rejectionReason; }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\ApplicationStatus.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+public enum ApplicationStatus {
+    PENDING,
+    UNDER_REVIEW,
+    INTERVIEW_SCHEDULED,
+    REJECTED,
+    HIRED
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\Customer.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+import jakarta.persistence.*;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+
+@Entity
+public class Customer implements UserDetails {
+    @Id
+    private String  mobileNumber;
+
+    @Column(nullable = false , unique = true) // this means customer can not enter one mail many times this must be unique every time when open new account one email fo rone account
+    private String email;
+
+    private String fname;
+    private String lname;
+    private String fathername;
+    private String address;
+    private String pincode;
+    private LocalDate dob;
+    private String password;
+    private String accountNumber;
+    private String ifsCode;
+    private String branchCode;
+    private double balance;
+    @Column(nullable = false,unique = true)
+    private String customerId;
+
+    // this new two field for admin roel
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
+    private boolean isAdmin = false;
+
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
+    private boolean isApproved = false;
+
+//    @Column(nullable = false , columnDefinition = "BOOLEAN DEFAULT false")
+//    private boolean isEmployee = false;
+
+    public Customer(){
+
+    }
+
+    public Customer(String fathername,
+                    String customerId,
+                    LocalDate dob, String pincode,
+                    boolean isAdmin, boolean isApproved,
+                    boolean isEmployee,
+
+                    String address, String lname, String fname, String email, String mobileNumber , String password , String accountNumber , String ifsCode, String branchCode , double balance) {
+        this.fathername = fathername;
+        this.dob = dob;
+        this.pincode = pincode;
+        this.address = address;
+        this.lname = lname;
+        this.fname = fname;
+        this.email = email;
+        this.mobileNumber = mobileNumber;
+        this.password=password;
+        this.accountNumber=accountNumber;
+        this.ifsCode=ifsCode;
+        this.branchCode=branchCode;
+        this.balance=balance;
+        this.customerId=customerId;
+        this.isAdmin=isAdmin;
+        this.isApproved=isApproved;
+//        this.isEmployee = isEmployee;
+    }
+
+    public Customer(Customer customer) {
+
+    }
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        List<GrantedAuthority> authorities = new ArrayList<>();
+        if (this.isAdmin) {
+            authorities.add(new SimpleGrantedAuthority("ROLE_ADMIN"));
+        } else if (this.isApproved) { // Must NOT be employee AND approved/active
+            authorities.add(new SimpleGrantedAuthority("ROLE_USER"));
+        }
+        // If not approved, they have no role effectively preventing login via isEnabled()
+        return authorities;
+    }
+
+
+    public String getMobileNumber() {
+        return mobileNumber;
+    }
+
+    public void setMobileNumber(String mobileNumber) {
+        this.mobileNumber = mobileNumber;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public String getFname() {
+        return fname;
+    }
+
+    public void setFname(String fname) {
+        this.fname = fname;
+    }
+
+    public String getFathername() {
+        return fathername;
+    }
+
+    public void setFathername(String fathername) {
+        this.fathername = fathername;
+    }
+
+    public String getLname() {
+        return lname;
+    }
+
+    public void setLname(String lname) {
+        this.lname = lname;
+    }
+
+    public String getAddress() {
+        return address;
+    }
+
+    public void setAddress(String address) {
+        this.address = address;
+    }
+
+    public String getPincode() {
+        return pincode;
+    }
+
+    public void setPincode(String pincode) {
+        this.pincode = pincode;
+    }
+
+    public LocalDate getDob() {
+        return dob;
+    }
+
+    public void setDob(LocalDate dob) {
+        this.dob = dob;
+    }
+
+    @Override
+    public String getPassword() {
+        return password;
+    }
+
+    @Override
+    public String getUsername() {
+        return this.customerId;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return this.isApproved || this.isAdmin;
+    }
+
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public String getAccountNumber() {
+        return accountNumber;
+    }
+
+    public void setAccountNumber(String accountNumber) {
+        this.accountNumber = accountNumber;
+    }
+
+    public String getIfsCode() {
+        return ifsCode;
+    }
+
+    public void setIfsCode(String ifsCode) {
+        this.ifsCode = ifsCode;
+    }
+
+    public String getBranchCode() {
+        return branchCode;
+    }
+
+    public void setBranchCode(String branchCode) {
+        this.branchCode = branchCode;
+    }
+
+    public double getBalance() {
+        return balance;
+    }
+
+    public void setBalance(double balance) {
+        this.balance = balance;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public boolean isAdmin() {
+        return isAdmin;
+    }
+
+    public void setAdmin(boolean admin) {
+        isAdmin = admin;
+    }
+
+    public boolean isApproved() {
+        return isApproved;
+    }
+
+    public void setApproved(boolean approved) {
+        isApproved = approved;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\Employee.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+// --- File: main/java/com/Banking_Somnath/banking_systemn/model/Employee.java --
+
+import jakarta.persistence.*;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import java.time.LocalDate;
+import java.util.Collection;
+import java.util.Collections;
+
+@Entity
+@Table(name = "employee") // Map to the 'employee' database table
+public class Employee implements UserDetails {
+
+    @Id
+    @Column(nullable = false, unique = true, length = 50) // Primary Key
+    private String employeeId; // This will be the username (e.g., EMP-XXXXXX)
+
+    @Column(nullable = false, unique = true)
+    private String email;
+
+    @Column(nullable = false)
+    private String password; // Hashed password
+
+    @Column(length = 50)
+    private String fname;
+
+    @Column(length = 50)
+    private String lname;
+
+    @Column(length = 20, unique = true)
+    private String mobileNumber;
+
+    @Column(length = 100)
+    private String jobTitle;
+
+    private LocalDate hireDate;
+
+    // Flags relevant for UserDetails interface
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT true")
+    private boolean accountEnabled = true; // Employees are active once created
+
+    @Column(nullable = false, columnDefinition = "BOOLEAN DEFAULT false")
+    private boolean accountLocked = false;
+
+    // --- Default Constructor (Required by JPA) ---
+    public Employee() {
+    }
+
+    // --- Getters and Setters ---
+    // (Generate for all fields: employeeId, email, password, fname, lname, mobileNumber,
+    // jobTitle, hireDate, accountEnabled, accountLocked)
+
+    public String getEmployeeId() { return employeeId; }
+    public void setEmployeeId(String employeeId) { this.employeeId = employeeId; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+    public String getPassword() { return password; } // Getter needed by UserDetails
+    public void setPassword(String password) { this.password = password; }
+    public String getFname() { return fname; }
+    public void setFname(String fname) { this.fname = fname; }
+    public String getLname() { return lname; }
+    public void setLname(String lname) { this.lname = lname; }
+    public String getMobileNumber() { return mobileNumber; }
+    public void setMobileNumber(String mobileNumber) { this.mobileNumber = mobileNumber; }
+    public String getJobTitle() { return jobTitle; }
+    public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
+    public LocalDate getHireDate() { return hireDate; }
+    public void setHireDate(LocalDate hireDate) { this.hireDate = hireDate; }
+    public boolean isAccountEnabled() { return accountEnabled; }
+    public void setAccountEnabled(boolean accountEnabled) { this.accountEnabled = accountEnabled; }
+    public boolean isAccountLocked() { return accountLocked; }
+    public void setAccountLocked(boolean accountLocked) { this.accountLocked = accountLocked; }
+
+
+    // --- UserDetails Implementation ---
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        // All users in this table are employees
+        return Collections.singletonList(new SimpleGrantedAuthority("ROLE_EMPLOYEE"));
+    }
+
+    @Override
+    public String getUsername() {
+        // Spring Security uses this as the unique identifier for login
+        return this.employeeId;
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true; // Or implement logic if accounts expire
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return !this.accountLocked; // Use the flag
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true; // Or implement logic if passwords expire
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return this.accountEnabled; // Use the flag
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\FixedDeposit.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+
+@Entity
+public class FixedDeposit {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY) // Link to the customer
+    @JoinColumn(name = "customer_obj_mobile_number", referencedColumnName = "mobileNumber", nullable = false)
+    private Customer customer; // Store the Customer object directly for easy access to customer details
+
+    @Column(nullable = false)
+    private String customerId; // Keep customerId as a direct string reference for simpler querying if needed
+
+    @Column(nullable = false)
+    private Double principalAmount;
+
+    @Column(nullable = false)
+    private Double interestRate; // Annual interest rate (percentage, e.g., 6.5 for 6.5%)
+
+    @Column(nullable = false)
+    private Integer termInMonths;
+
+    private LocalDate startDate; // Date when the FD becomes active (set upon approval)
+
+    private LocalDate maturityDate; // Calculated upon approval based on startDate and term
+
+    private Double maturityAmount; // Calculated total amount customer will receive at maturity
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private FixedDepositStatus status;
+
+    @Column(nullable = false)
+    private LocalDateTime applicationDate; // When the customer submitted the request
+
+    private LocalDateTime actionDate; // When admin approved/rejected it
+
+    private String actionByAdminId; // Customer ID of the admin who took action
+
+    @Column(length = 500) // Allow for a decent length rejection reason
+    private String rejectionReason; // Reason if status is REJECTED
+
+    @Column(nullable = false, length = 20) // Assuming account numbers are around this length
+    private String sourceAccountNumber; // Customer's account from which principal was (or will be) debited
+
+    // --- Constructors ---
+    public FixedDeposit() {
+        this.applicationDate = LocalDateTime.now();
+        this.status = FixedDepositStatus.PENDING; // Default status on creation
+    }
+
+    // --- Getters and Setters ---
+    // (Generated by IDE for all fields)
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public Customer getCustomer() {
+        return customer;
+    }
+
+    public void setCustomer(Customer customer) {
+        this.customer = customer;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public Double getPrincipalAmount() {
+        return principalAmount;
+    }
+
+    public void setPrincipalAmount(Double principalAmount) {
+        this.principalAmount = principalAmount;
+    }
+
+    public Double getInterestRate() {
+        return interestRate;
+    }
+
+    public void setInterestRate(Double interestRate) {
+        this.interestRate = interestRate;
+    }
+
+    public Integer getTermInMonths() {
+        return termInMonths;
+    }
+
+    public void setTermInMonths(Integer termInMonths) {
+        this.termInMonths = termInMonths;
+    }
+
+    public LocalDate getStartDate() {
+        return startDate;
+    }
+
+    public void setStartDate(LocalDate startDate) {
+        this.startDate = startDate;
+    }
+
+    public LocalDate getMaturityDate() {
+        return maturityDate;
+    }
+
+    public void setMaturityDate(LocalDate maturityDate) {
+        this.maturityDate = maturityDate;
+    }
+
+    public Double getMaturityAmount() {
+        return maturityAmount;
+    }
+
+    public void setMaturityAmount(Double maturityAmount) {
+        this.maturityAmount = maturityAmount;
+    }
+
+    public FixedDepositStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(FixedDepositStatus status) {
+        this.status = status;
+    }
+
+    public LocalDateTime getApplicationDate() {
+        return applicationDate;
+    }
+
+    public void setApplicationDate(LocalDateTime applicationDate) {
+        this.applicationDate = applicationDate;
+    }
+
+    public LocalDateTime getActionDate() {
+        return actionDate;
+    }
+
+    public void setActionDate(LocalDateTime actionDate) {
+        this.actionDate = actionDate;
+    }
+
+    public String getActionByAdminId() {
+        return actionByAdminId;
+    }
+
+    public void setActionByAdminId(String actionByAdminId) {
+        this.actionByAdminId = actionByAdminId;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
+    }
+
+    public String getSourceAccountNumber() {
+        return sourceAccountNumber;
+    }
+
+    public void setSourceAccountNumber(String sourceAccountNumber) {
+        this.sourceAccountNumber = sourceAccountNumber;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\FixedDepositStatus.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+public enum FixedDepositStatus {
+    PENDING,    // Application submitted by customer, awaiting admin approval
+    ACTIVE,     // Approved by admin, FD is running, principal debited
+    REJECTED,   // Application rejected by admin
+    MATURED,    // Term completed, awaiting payout (or auto-payout)
+    CLOSED      // Prematurely closed by customer (optional, involves penalty logic)
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\JobApplication.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+public class JobApplication {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String applicantFirstName;
+
+    @Column(nullable = false)
+    private String applicantLastName;
+
+    @Column(nullable = false, unique = true) // Ensure email is unique for applications? Maybe not.
+    private String applicantEmail;
+
+    @Column(nullable = false)
+    private String applicantPhone;
+
+    @Lob // For potentially long text
+    @Column(columnDefinition = "TEXT")
+    private String qualifications;
+
+    @Lob
+    @Column(columnDefinition = "TEXT")
+    private String experience;
+
+    private String desiredRole;
+    private String resumeLink; // Optional link to external resume
+
+    @Column(nullable = false)
+    private LocalDateTime applicationDate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ApplicationStatus status;
+
+    private String reviewerAdminId; // Customer ID of the admin who reviewed/actioned
+    private LocalDateTime interviewDate;
+
+    @Lob
+    @Column(columnDefinition = "TEXT")
+    private String adminNotes;
+
+    // --- Constructors ---
+    public JobApplication() {
+        this.applicationDate = LocalDateTime.now();
+        this.status = ApplicationStatus.PENDING;
+    }
+
+    // --- Getters and Setters ---
+    // (Generate using IDE)
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public String getApplicantFirstName() { return applicantFirstName; }
+    public void setApplicantFirstName(String applicantFirstName) { this.applicantFirstName = applicantFirstName; }
+    public String getApplicantLastName() { return applicantLastName; }
+    public void setApplicantLastName(String applicantLastName) { this.applicantLastName = applicantLastName; }
+    public String getApplicantEmail() { return applicantEmail; }
+    public void setApplicantEmail(String applicantEmail) { this.applicantEmail = applicantEmail; }
+    public String getApplicantPhone() { return applicantPhone; }
+    public void setApplicantPhone(String applicantPhone) { this.applicantPhone = applicantPhone; }
+    public String getQualifications() { return qualifications; }
+    public void setQualifications(String qualifications) { this.qualifications = qualifications; }
+    public String getExperience() { return experience; }
+    public void setExperience(String experience) { this.experience = experience; }
+    public String getDesiredRole() { return desiredRole; }
+    public void setDesiredRole(String desiredRole) { this.desiredRole = desiredRole; }
+    public String getResumeLink() { return resumeLink; }
+    public void setResumeLink(String resumeLink) { this.resumeLink = resumeLink; }
+    public LocalDateTime getApplicationDate() { return applicationDate; }
+    public void setApplicationDate(LocalDateTime applicationDate) { this.applicationDate = applicationDate; }
+    public ApplicationStatus getStatus() { return status; }
+    public void setStatus(ApplicationStatus status) { this.status = status; }
+    public String getReviewerAdminId() { return reviewerAdminId; }
+    public void setReviewerAdminId(String reviewerAdminId) { this.reviewerAdminId = reviewerAdminId; }
+    public LocalDateTime getInterviewDate() { return interviewDate; }
+    public void setInterviewDate(LocalDateTime interviewDate) { this.interviewDate = interviewDate; }
+    public String getAdminNotes() { return adminNotes; }
+    public void setAdminNotes(String adminNotes) { this.adminNotes = adminNotes; }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\LoanApplication.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+
+@Entity
+public class LoanApplication {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String customerId; // Links to Customer
+
+    @Column(nullable = false, length = 50) // Limit length
+    private String loanType; // E.g., "PERSONAL", "HOME", "CAR"
+
+    @Column(nullable = false)
+    private Double requestedAmount;
+
+    @Column(nullable = false)
+    private Integer termInMonths;
+
+    @Lob // For potentially long text like purpose description
+    @Column(columnDefinition = "TEXT", nullable = false)
+    private String purpose;
+
+    @Column(nullable = false)
+    private LocalDateTime applicationDate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private LoanApplicationStatus status;
+
+    // --- Fields populated by Admin ---
+    private Double approvedAmount;      // Set on approval
+    private Double interestRate;        // Set on approval (annual rate %)
+    private LocalDateTime approvalDate; // Set on approval
+    private String approvedByAdminId;   // Admin who took action (approve/reject)
+    private String rejectionReason;     // Set on rejection
+
+    // --- Optional fields provided by customer ---
+    private Double monthlyIncome;
+    @Column(length = 50)
+    private String employmentStatus; // E.g., "Salaried", "Self-Employed"
+
+    // --- Constructors ---
+    public LoanApplication() {
+        this.applicationDate = LocalDateTime.now();
+        this.status = LoanApplicationStatus.PENDING; // Default status
+    }
+
+    // --- Getters and Setters (Generated by IDE) ---
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public String getLoanType() {
+        return loanType;
+    }
+
+    public void setLoanType(String loanType) {
+        this.loanType = loanType;
+    }
+
+    public Double getRequestedAmount() {
+        return requestedAmount;
+    }
+
+    public void setRequestedAmount(Double requestedAmount) {
+        this.requestedAmount = requestedAmount;
+    }
+
+    public Integer getTermInMonths() {
+        return termInMonths;
+    }
+
+    public void setTermInMonths(Integer termInMonths) {
+        this.termInMonths = termInMonths;
+    }
+
+    public String getPurpose() {
+        return purpose;
+    }
+
+    public void setPurpose(String purpose) {
+        this.purpose = purpose;
+    }
+
+    public LocalDateTime getApplicationDate() {
+        return applicationDate;
+    }
+
+    public void setApplicationDate(LocalDateTime applicationDate) {
+        this.applicationDate = applicationDate;
+    }
+
+    public LoanApplicationStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(LoanApplicationStatus status) {
+        this.status = status;
+    }
+
+    public Double getApprovedAmount() {
+        return approvedAmount;
+    }
+
+    public void setApprovedAmount(Double approvedAmount) {
+        this.approvedAmount = approvedAmount;
+    }
+
+    public Double getInterestRate() {
+        return interestRate;
+    }
+
+    public void setInterestRate(Double interestRate) {
+        this.interestRate = interestRate;
+    }
+
+    public LocalDateTime getApprovalDate() {
+        return approvalDate;
+    }
+
+    public void setApprovalDate(LocalDateTime approvalDate) {
+        this.approvalDate = approvalDate;
+    }
+
+    public String getApprovedByAdminId() {
+        return approvedByAdminId;
+    }
+
+    public void setApprovedByAdminId(String approvedByAdminId) {
+        this.approvedByAdminId = approvedByAdminId;
+    }
+
+    public String getRejectionReason() {
+        return rejectionReason;
+    }
+
+    public void setRejectionReason(String rejectionReason) {
+        this.rejectionReason = rejectionReason;
+    }
+
+    public Double getMonthlyIncome() {
+        return monthlyIncome;
+    }
+
+    public void setMonthlyIncome(Double monthlyIncome) {
+        this.monthlyIncome = monthlyIncome;
+    }
+
+    public String getEmploymentStatus() {
+        return employmentStatus;
+    }
+
+    public void setEmploymentStatus(String employmentStatus) {
+        this.employmentStatus = employmentStatus;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\LoanApplicationStatus.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+// Statuses for the loan application lifecycle
+public enum LoanApplicationStatus {
+    PENDING,        // Submitted, needs admin action
+    UNDER_REVIEW,   // Optional: Admin is actively reviewing
+    APPROVED,       // Approved, pending disbursement (disbursement is a separate future step)
+    REJECTED,       // Application denied
+    DISBURSED,      // Funds given to customer (Future State)
+    CLOSED          // Loan fully repaid (Future State)
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\model\Transaction.java ---
+package com.Banking_Somnath.banking_systemn.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+import java.time.LocalDateTime;
+
+@Entity
+public class Transaction {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(nullable = false,unique = true)
+    private String customerId;
+    @Column(nullable = true)
+    private String mobileNo;
+    private double balance;
+    private String description;
+    private LocalDateTime localDateTime;
+    private String senderAccountNumber;  // Account Number for the sender
+    private String recipientAccountNumber;  // Account Number for the recipient
+    private String branchCode;  // Branch Code relevant to the transaction (could be sender's or receiver's bank/branch)
+    private String ifscCode;    // IFSC Code relevant to the transaction
+    private String senderMobileNo;
+    private String recipientMobileNo;
+    private String type;
+    public Transaction() {
+    }
+
+    public Transaction(Long id, String mobileNo,
+                       String customerId,
+                       double balance, String description, LocalDateTime localDateTime, String senderAccountNumber, String recipientAccountNumber, String branchCode, String ifscCode, String senderMobileNo, String recipientMobileNo, String type) {
+        this.id = id;
+        this.mobileNo = mobileNo;
+        this.balance = balance;
+        this.description = description;
+        this.localDateTime = localDateTime;
+        this.senderAccountNumber = senderAccountNumber;
+        this.recipientAccountNumber = recipientAccountNumber;
+        this.branchCode = branchCode;
+        this.ifscCode = ifscCode;
+        this.senderMobileNo = senderMobileNo;
+        this.recipientMobileNo = recipientMobileNo;
+        this.type = type;
+        this.customerId=customerId;
+    }
+
+    public String getCustomerId(){
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public Long getId() {
+        return id;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
+    }
+
+    public String getMobileNo() {
+        return mobileNo;
+    }
+
+    public void setMobileNo(String mobileNo) {
+        this.mobileNo = mobileNo;
+    }
+
+    public double getBalance() {
+        return balance;
+    }
+
+    public void setBalance(double balance) {
+        this.balance = balance;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void setDescription(String description) {
+        this.description = description;
+    }
+
+    public LocalDateTime getLocalDateTime() {
+        return localDateTime;
+    }
+
+    public void setLocalDateTime(LocalDateTime localDateTime) {
+        this.localDateTime = localDateTime;
+    }
+
+    public String getSenderAccountNumber() {
+        return senderAccountNumber;
+    }
+
+    public void setSenderAccountNumber(String senderAccountNumber) {
+        this.senderAccountNumber = senderAccountNumber;
+    }
+
+    public String getRecipientAccountNumber() {
+        return recipientAccountNumber;
+    }
+
+    public void setRecipientAccountNumber(String recipientAccountNumber) {
+        this.recipientAccountNumber = recipientAccountNumber;
+    }
+
+    public String getBranchCode() {
+        return branchCode;
+    }
+
+    public void setBranchCode(String branchCode) {
+        this.branchCode = branchCode;
+    }
+
+    public String getIfscCode() {
+        return ifscCode;
+    }
+
+    public void setIfscCode(String ifscCode) {
+        this.ifscCode = ifscCode;
+    }
+
+    public String getSenderMobileNo() {
+        return senderMobileNo;
+    }
+
+    public void setSenderMobileNo(String senderMobileNo) {
+        this.senderMobileNo = senderMobileNo;
+    }
+
+    public String getRecipientMobileNo() {
+        return recipientMobileNo;
+    }
+
+    public void setRecipientMobileNo(String recipientMobileNo) {
+        this.recipientMobileNo = recipientMobileNo;
+    }
+
+    public String getType() {
+        return type;
+    }
+
+    public void setType(String type) {
+        this.type = type;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\CustomerRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;
+
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+
+@Repository
+public interface CustomerRepository extends JpaRepository<Customer, String> {
+    Optional<Customer> findByEmail(String email);
+    Optional<Customer> findByMobileNumber(String mobileNumber);
+    Optional<Customer> findByCustomerId(String customerId);
+    List<Customer> findByIsApproved(boolean isApproved); // Find by customer by their approval status
+    Optional<Customer> findByCustomerIdAndMobileNumber(String customerId, String mobileNumber);
+
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\EmployeeRepository.java ---
+
+// --- File: main/java/com/Banking_Somnath/banking_systemn/repository/EmployeeRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;
+
+import com.Banking_Somnath.banking_systemn.model.Employee;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.Optional;
+
+@Repository
+public interface EmployeeRepository extends JpaRepository<Employee, String> { // Primary Key is String
+
+    // Find by the primary key / username
+    Optional<Employee> findByEmployeeId(String employeeId);
+
+    // Find by email (for checks)
+    Optional<Employee> findByEmail(String email);
+
+    // Find by mobile (for checks)
+    Optional<Employee> findByMobileNumber(String mobileNumber);
+
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\FixedDepositRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;// In main\java\com\Banking_Somnath\banking_systemn\repository\FixedDepositRepository.java
+// Add these imports if not already present:
+import com.Banking_Somnath.banking_systemn.model.FixedDeposit;
+import com.Banking_Somnath.banking_systemn.model.FixedDepositStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+// ... other imports ...
+
+@Repository
+public interface FixedDepositRepository extends JpaRepository<FixedDeposit, Long> {
+    // ... your existing methods ...
+
+    // Replace or add this method for fetching pending FDs with their customers
+    @Query("SELECT fd FROM FixedDeposit fd JOIN FETCH fd.customer c WHERE fd.status = :status ORDER BY fd.applicationDate ASC")
+    List<FixedDeposit> findByStatusWithCustomerOrderByApplicationDateAsc(@Param("status") FixedDepositStatus status);
+}
+
+
+
+
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\JobApplicationRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;
+
+import com.Banking_Somnath.banking_systemn.model.ApplicationStatus;
+import com.Banking_Somnath.banking_systemn.model.JobApplication;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public interface JobApplicationRepository  extends JpaRepository<JobApplication , Long> {
+    List<JobApplication> findByStatusOrderByApplicationDateDesc(ApplicationStatus status);
+    List<JobApplication> findAllByOrderByApplicationDateDesc();
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\LoanApplicationRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;
+
+import com.Banking_Somnath.banking_systemn.model.LoanApplication;
+import com.Banking_Somnath.banking_systemn.model.LoanApplicationStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+
+@Repository
+public interface LoanApplicationRepository extends JpaRepository<LoanApplication, Long> {
+
+    // Find all loan applications for a specific customer, ordered by application date descending
+    List<LoanApplication> findByCustomerIdOrderByApplicationDateDesc(String customerId);
+
+    // Find all loan applications with a specific status (or multiple statuses)
+    // Order by application date ascending so oldest pending are seen first by admin
+    List<LoanApplication> findByStatusInOrderByApplicationDateAsc(List<LoanApplicationStatus> statuses);
+
+    // Specific finder if only pending needed often
+    List<LoanApplication> findByStatusOrderByApplicationDateAsc(LoanApplicationStatus status);
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\repository\TransactionRepository.java ---
+package com.Banking_Somnath.banking_systemn.repository;
+
+import com.Banking_Somnath.banking_systemn.model.Transaction;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Repository
+public interface TransactionRepository extends JpaRepository<Transaction, Long> {
+    List<Transaction> findByCustomerIdAndLocalDateTimeBetweenOrderByLocalDateTimeDesc(
+            String customerId,
+            LocalDateTime startDateTime,
+            LocalDateTime endDateTime
+    );
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\ApproveLoanRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// Add validation later: @NotNull, @DecimalMin
+// import jakarta.validation.constraints.*;
+
+public class ApproveLoanRequest {
+
+    // @NotNull(message = "Approved amount is required")
+    // @DecimalMin(value = "1.00", message = "Approved amount must be positive")
+    private Double approvedAmount;
+
+    // @NotNull(message = "Interest rate is required")
+    // @DecimalMin(value = "0.1", message = "Interest rate must be positive") // e.g., 0.1% minimum
+    // @DecimalMax(value = "30.0", message = "Interest rate seems too high (max 30%)") // Example limit
+    private Double interestRate;
+
+    // Getters and Setters (Generated by IDE)
+
+    public Double getApprovedAmount() {
+        return approvedAmount;
+    }
+
+    public void setApprovedAmount(Double approvedAmount) {
+        this.approvedAmount = approvedAmount;
+    }
+
+    public Double getInterestRate() {
+        return interestRate;
+    }
+
+    public void setInterestRate(Double interestRate) {
+        this.interestRate = interestRate;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\CheckBalanceRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+import jakarta.persistence.Id;
+
+public class CheckBalanceRequest {
+    @Id
+    private String customerId;
+    private String email;
+    private double balance;
+
+    public CheckBalanceRequest(String customerId, String email, double balance) {
+        this.customerId = customerId;
+        this.email = email;
+        this.balance = balance;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
+    }
+
+    public double getBalance() {
+        return balance;
+    }
+
+    public void setBalance(double balance) {
+        this.balance = balance;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\CreateFdRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// You can add JSR 303 validation annotations here later if needed
+// import jakarta.validation.constraints.*;
+
+public class CreateFdRequest {
+
+    // @NotNull(message = "Principal amount is required.")
+    // @DecimalMin(value = "1000.00", inclusive = true, message = "Minimum FD amount must be ₹1,000.00 or more.")
+    private Double principalAmount;
+
+    // @NotNull(message = "Term in months is required.")
+    // @Min(value = 1, message = "Minimum term for an FD is 1 month.")
+    // @Max(value = 120, message = "Maximum term for an FD is 120 months (10 years).") // Example maximum
+    private Integer termInMonths;
+
+    // Getters and Setters
+    public Double getPrincipalAmount() {
+        return principalAmount;
+    }
+
+    public void setPrincipalAmount(Double principalAmount) {
+        this.principalAmount = principalAmount;
+    }
+
+    public Integer getTermInMonths() {
+        return termInMonths;
+    }
+
+    public void setTermInMonths(Integer termInMonths) {
+        this.termInMonths = termInMonths;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\CreateLoanRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// Add validation later: @NotBlank, @NotNull, @Min, @Max etc.
+// import jakarta.validation.constraints.*;
+
+public class CreateLoanRequest {
+
+    // @NotBlank(message = "Loan type is required")
+    private String loanType;
+
+    // @NotNull(message = "Requested amount is required")
+    // @DecimalMin(value = "1000.00", message = "Minimum loan amount is ₹1000")
+    private Double requestedAmount;
+
+    // @NotNull(message = "Term in months is required")
+    // @Min(value = 6, message = "Minimum term is 6 months")
+    // @Max(value = 120, message = "Maximum term is 120 months") // Example limits
+    private Integer termInMonths;
+
+    // @NotBlank(message = "Purpose of the loan is required")
+    // @Size(max = 1000, message = "Purpose description is too long (max 1000 chars)")
+    private String purpose;
+
+    // Optional fields
+    private Double monthlyIncome;
+    private String employmentStatus;
+
+    // Getters and Setters (Generated by IDE)
+
+    public String getLoanType() {
+        return loanType;
+    }
+
+    public void setLoanType(String loanType) {
+        this.loanType = loanType;
+    }
+
+    public Double getRequestedAmount() {
+        return requestedAmount;
+    }
+
+    public void setRequestedAmount(Double requestedAmount) {
+        this.requestedAmount = requestedAmount;
+    }
+
+    public Integer getTermInMonths() {
+        return termInMonths;
+    }
+
+    public void setTermInMonths(Integer termInMonths) {
+        this.termInMonths = termInMonths;
+    }
+
+    public String getPurpose() {
+        return purpose;
+    }
+
+    public void setPurpose(String purpose) {
+        this.purpose = purpose;
+    }
+
+    public Double getMonthlyIncome() {
+        return monthlyIncome;
+    }
+
+    public void setMonthlyIncome(Double monthlyIncome) {
+        this.monthlyIncome = monthlyIncome;
+    }
+
+    public String getEmploymentStatus() {
+        return employmentStatus;
+    }
+
+    public void setEmploymentStatus(String employmentStatus) {
+        this.employmentStatus = employmentStatus;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\DepositRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+public class DepositRequest {
+    private String mobileNo;
+    private String accountNo;
+    private double amount;
+
+    public String getMobileNo() {
+        return mobileNo;
+    }
+
+    public void setMobileNo(String mobileNo) {
+        this.mobileNo = mobileNo;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+
+    public String getAccountNo() {
+        return accountNo;
+    }
+
+    public void setAccountNo(String accountNo) {
+        this.accountNo = accountNo;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\EmployeeActionRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// Base class or just use specific DTOs if fields differ significantly
+public class EmployeeActionRequest {
+    // Fields needed by specific actions (e.g., target customer identifier, amount)
+    // Example:
+    private String targetCustomerId; // Can be Customer ID or Account Number
+    private double amount;
+
+    // Getters and Setters
+    public String getTargetCustomerId() {
+        return targetCustomerId;
+    }
+
+    public void setTargetCustomerId(String targetCustomerId) {
+        this.targetCustomerId = targetCustomerId;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\JobApplicationRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+public class JobApplicationRequest {
+
+    // Use validation annotations if you add the dependency: spring-boot-starter-validation
+    // @NotBlank(message = "First name is required")
+    private String applicantFirstName;
+
+    // @NotBlank(message = "Last name is required")
+    private String applicantLastName;
+
+    // @NotBlank(message = "Email is required")
+    // @Email(message = "Invalid email format")
+    private String applicantEmail;
+
+    // @NotBlank(message = "Phone number is required")
+    // @Size(min = 10, max = 15, message = "Phone number must be between 10 and 15 digits") // Adjust size as needed
+    private String applicantPhone;
+
+    // @NotBlank(message = "Qualifications are required")
+    private String qualifications; // Can be a longer text description
+
+    private String experience; // Optional field, can be longer text
+
+    // @NotBlank(message = "Desired role is required")
+    private String desiredRole;
+
+    private String resumeLink; // Optional link to an online resume (e.g., LinkedIn, Google Drive)
+
+    // --- Default Constructor (Needed for frameworks like Jackson) ---
+    public JobApplicationRequest() {
+    }
+
+    // --- Getters ---
+    public String getApplicantFirstName() {
+        return applicantFirstName;
+    }
+
+    public String getApplicantLastName() {
+        return applicantLastName;
+    }
+
+    public String getApplicantEmail() {
+        return applicantEmail;
+    }
+
+    public String getApplicantPhone() {
+        return applicantPhone;
+    }
+
+    public String getQualifications() {
+        return qualifications;
+    }
+
+    public String getExperience() {
+        return experience;
+    }
+
+    public String getDesiredRole() {
+        return desiredRole;
+    }
+
+    public String getResumeLink() {
+        return resumeLink;
+    }
+
+    // --- Setters ---
+    public void setApplicantFirstName(String applicantFirstName) {
+        this.applicantFirstName = applicantFirstName;
+    }
+
+    public void setApplicantLastName(String applicantLastName) {
+        this.applicantLastName = applicantLastName;
+    }
+
+    public void setApplicantEmail(String applicantEmail) {
+        this.applicantEmail = applicantEmail;
+    }
+
+    public void setApplicantPhone(String applicantPhone) {
+        this.applicantPhone = applicantPhone;
+    }
+
+    public void setQualifications(String qualifications) {
+        this.qualifications = qualifications;
+    }
+
+    public void setExperience(String experience) {
+        this.experience = experience;
+    }
+
+    public void setDesiredRole(String desiredRole) {
+        this.desiredRole = desiredRole;
+    }
+
+    public void setResumeLink(String resumeLink) {
+        this.resumeLink = resumeLink;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\LoginRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+public class LoginRequest {
+    private String mobileNumber;
+    private String customerId;
+    private String password;
+
+    public LoginRequest(){
+
+    }
+
+    public LoginRequest(String mobileNumber, String password, String customerID) {
+        this.mobileNumber = mobileNumber;
+        this.password = password;
+        this.customerId = customerID;
+    }
+
+    public String getMobileNumber() {
+        return mobileNumber;
+    }
+
+    public void setMobileNumber(String mobileNumber) {
+        this.mobileNumber = mobileNumber;
+    }
+
+    public String getCustomerId() {
+        return customerId;
+    }
+
+    public void setCustomerId(String customerId) {
+        this.customerId = customerId;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\RejectApplicationRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+// Possibly add @NotBlank
+// import jakarta.validation.constraints.NotBlank;
+
+public class RejectApplicationRequest {
+
+    // @NotBlank(message = "Rejection reason cannot be blank")
+    private String reason;
+
+    // Getters and Setters
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\RejectRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// Assuming this is generic enough for Loans, FDs, Job Apps etc.
+// Add validation later: @NotBlank
+// import jakarta.validation.constraints.*;
+
+public class RejectRequest {
+
+    // @NotBlank(message = "Rejection reason cannot be blank")
+    private String reason;
+
+    // Getters and Setters (Generated by IDE)
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\RejectRequestForFd.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+// This DTO can be used for rejecting various types of applications (FD, Loan, Job etc.)
+// if the only required field is a reason.
+// import jakarta.validation.constraints.*;
+
+public class RejectRequestForFd {
+
+    // @NotBlank(message = "Rejection reason cannot be blank.")
+    // @Size(min = 5, max = 500, message = "Rejection reason must be between 5 and 500 characters.")
+    private String reason;
+
+    // Getters and Setters
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\ScheduleInterviewRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+import java.time.LocalDateTime;
+public class ScheduleInterviewRequest {
+
+
+    private LocalDateTime interviewDate;
+
+    // Getters and Setters
+    public LocalDateTime getInterviewDate() {
+        return interviewDate;
+    }
+
+    public void setInterviewDate(LocalDateTime interviewDate) {
+        this.interviewDate = interviewDate;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\TransactionHistoryRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+public class TransactionHistoryRequest {
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\TransferMoney.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+
+public class TransferMoney {
+    private double amount;
+//    private String senderPassword; // Name it clearly to avoid confusion
+    private String receiverCustomerId;
+    private String receiverMobileNo;
+
+    // Getters and Setters (Generate these using your IDE or manually)
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+
+//    public String getSenderPassword() {
+//        return senderPassword;
+//    }
+
+//    public void setSenderPassword(String senderPassword) {
+//        this.senderPassword = senderPassword;
+//    }
+
+    public String getReceiverCustomerId() {
+        return receiverCustomerId;
+    }
+
+    public void setReceiverCustomerId(String receiverCustomerId) {
+        this.receiverCustomerId = receiverCustomerId;
+    }
+
+    public String getReceiverMobileNo() {
+        return receiverMobileNo;
+    }
+
+    public void setReceiverMobileNo(String receiverMobileNo) {
+        this.receiverMobileNo = receiverMobileNo;
+    }
+}
+
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\request\WithdrawRequest.java ---
+package com.Banking_Somnath.banking_systemn.request;
+
+public class WithdrawRequest {
+    private String mobileNo;
+    private String accountNo;
+    private double amount;
+    private String password;
+
+    public String getMobileNo() {
+        return mobileNo;
+    }
+
+    public void setMobileNo(String mobileNo) {
+        this.mobileNo = mobileNo;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public double getAmount() {
+        return amount;
+    }
+
+    public void setAmount(double amount) {
+        this.amount = amount;
+    }
+
+    public String getAccountNo() {
+        return accountNo;
+    }
+
+    public void setAccountNo(String accountNo) {
+        this.accountNo = accountNo;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\response\BalanceResponse.java ---
+package com.Banking_Somnath.banking_systemn.response;
+
+import org.springframework.web.bind.annotation.ResponseStatus;
+
+public class BalanceResponse {
+    private boolean success;
+    private String balance;
+
+    public BalanceResponse(boolean success, String balance) {
+        this.success = success;
+        this.balance = balance;
+    }
+
+    // Getters and setters
+    public boolean isSuccess() {
+        return success;
+    }
+
+    public void setSuccess(boolean success) {
+        this.success = success;
+    }
+
+    public String getBalance() {
+        return balance;
+    }
+
+    public void setBalance(String balance) {
+        this.balance = balance;
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\security\CustomUserDetailsService.java ---
+package com.Banking_Somnath.banking_systemn.security;
+
+import com.Banking_Somnath.banking_systemn.model.Customer; // Keep Customer
+import com.Banking_Somnath.banking_systemn.model.Employee; // *** ADD Import for Employee ***
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository; // Keep CustomerRepository
+import com.Banking_Somnath.banking_systemn.repository.EmployeeRepository; // *** ADD Import for EmployeeRepository ***
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.userdetails.UserDetails; // Spring Security interface
+import org.springframework.security.core.userdetails.UserDetailsService; // Spring Security interface
+import org.springframework.security.core.userdetails.UsernameNotFoundException; // Standard exception
+import org.springframework.stereotype.Service; // Mark this as a Spring service bean
+
+import java.util.Optional; // Keep Optional
+
+@Service // This annotation makes the class a Spring-managed bean
+public class CustomUserDetailsService implements UserDetailsService {
+
+    @Autowired // Inject the Customer repository
+    private CustomerRepository customerRepository;
+
+    // *** ADD Autowire for EmployeeRepository ***
+    @Autowired
+    private EmployeeRepository employeeRepository;
+
+    @Override // Marks this method as implementing the one from UserDetailsService interface
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+
+        System.out.println("Attempting to load user by username/ID: " + username); // Original log
+
+        if (username == null || username.isBlank()) {
+            System.out.println("Error: Username cannot be empty."); // Log similar to original
+            throw new UsernameNotFoundException("Username cannot be empty.");
+        }
+
+        // --- START: Updated Logic to Check Both Repositories ---
+        if (username.startsWith("EMP-")) {
+            // Try loading as an Employee
+            System.out.println("Username starts with EMP-, attempting to load as Employee.");
+            // Find by employeeId and cast Optional<Employee> to Optional<UserDetails> before returning or throwing
+            return employeeRepository.findByEmployeeId(username)
+                    .map(employee -> {
+                        System.out.println("Employee found: " + employee.getUsername() + ", Enabled: " + employee.isEnabled()); // Log similar to original
+                        return (UserDetails) employee; // Return Employee as UserDetails
+                    })
+                    .orElseThrow(() -> {
+                        System.out.println("Employee not found with ID: " + username); // Log similar to original
+                        return new UsernameNotFoundException("Employee not found with ID: " + username);
+                    });
+
+        } else if (username.startsWith("CUST-") || username.startsWith("ADMIN-")) {
+            // Try loading as a Customer (or Admin stored in Customer table)
+            System.out.println("Username starts with CUST- or ADMIN-, attempting to load as Customer.");
+            // Find by customerId and cast Optional<Customer> to Optional<UserDetails>
+            return customerRepository.findByCustomerId(username)
+                    .map(customer -> {
+                        System.out.println("Customer/Admin found: " + customer.getUsername() + ", Enabled: " + customer.isEnabled()); // Log similar to original
+                        return (UserDetails) customer; // Return Customer as UserDetails
+                    })
+                    .orElseThrow(() -> {
+                        System.out.println("Customer/Admin not found with ID: " + username); // Log similar to original
+                        return new UsernameNotFoundException("Customer/Admin not found with ID: " + username);
+                    });
+        } else {
+            // If prefix doesn't match expected formats
+            System.out.println("Username '" + username + "' does not match expected prefixes (CUST-/EMP-/ADMIN-)"); // Log similar to original
+            throw new UsernameNotFoundException("User not found or invalid ID format: " + username);
+        }
+        // --- END: Updated Logic ---
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\AdminService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.JobApplication;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class AdminService {
+    private static final Logger log = LoggerFactory.getLogger(CustomerService.class);
+
+    @Autowired
+    JobApplicationService jobApplicationService;
+    @Autowired
+    private CustomerRepository customerRepository;
+
+    @Transactional(readOnly = true)
+    public List<Customer> findPendingRegistrations() {
+        return customerRepository.findByIsApproved(false);
+    }
+
+    @Transactional
+    public String approveRegistration(String customerId) {
+        Optional<Customer> optionalCustomer = customerRepository.findByCustomerId(customerId);
+
+        if (optionalCustomer.isEmpty()) {
+            return "Customer not found with ID: " + customerId;
+        }
+
+        Customer customer = optionalCustomer.get();
+
+        if (customer.isApproved()) {
+            return "Customer with ID: " + customerId + " is already approved.";
+        }
+
+        customer.setApproved(true);
+        customerRepository.save(customer);
+
+        return "Customer with ID: " + customerId + " successfully approved.";
+    }
+
+    @Transactional
+    public String rejectRegistration(String customerId) {
+        Optional<Customer> optionalCustomer = customerRepository.findByCustomerId(customerId);
+
+        if (optionalCustomer.isEmpty()) {
+            return "Customer not found with ID: " + customerId;
+        }
+
+        Customer customer = optionalCustomer.get();
+        customerRepository.delete(customer);
+
+        return "Customer with ID: " + customerId + " successfully rejected and removed.";
+    }
+
+    @Transactional(readOnly = true)
+    public List<JobApplication> getAllJobApplications() {
+        log.info("Admin fetching all job applications");
+        return jobApplicationService.getAllApplications();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<JobApplication> getJobApplicationDetails(Long appId) {
+        log.info("Admin fetching details for job application ID: {}", appId);
+        return jobApplicationService.getApplicationById(appId);
+    }
+
+    @Transactional
+    public JobApplication scheduleJobInterview(Long appId, LocalDateTime interviewDate, String adminId) {
+        log.info("Admin {} scheduling interview for application ID: {} on {}", adminId, appId, interviewDate);
+        return jobApplicationService.scheduleInterview(appId, interviewDate, adminId);
+    }
+
+    @Transactional
+    public JobApplication rejectJobApplication(Long appId, String reason, String adminId) {
+        log.info("Admin {} rejecting application ID: {} with reason: {}", adminId, appId, reason);
+        return jobApplicationService.rejectApplication(appId, reason, adminId);
+    }
+
+    @Transactional
+    public JobApplication hireApplicant(Long appId, String adminId) {
+        // Note: Initial password handling strategy is within JobApplicationService -> CustomerService
+        log.info("Admin {} initiating hire process for application ID: {}", adminId, appId);
+        return jobApplicationService.approveHire(appId, adminId);
+    }
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\CustomerService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.model.Employee;
+import com.Banking_Somnath.banking_systemn.model.JobApplication;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.repository.EmployeeRepository;
+import com.Banking_Somnath.banking_systemn.request.LoginRequest;
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.util.Optional;
+import java.util.UUID;
+
+@Service
+public class CustomerService {
+
+
+    private static final Logger log = LoggerFactory.getLogger(CustomerService.class);
+    @Autowired
+    CustomerRepository customerRepository;
+
+    @Autowired
+    EmployeeRepository employeeRepository;
+
+    @Autowired
+    PasswordEncoder passwordEncoder; // <<< Autowire the PasswordEncoder bean from SecurityConfig
+
+
+    public Customer generateBankDetails(Customer customer) {
+
+        String customerId;
+        do {
+            customerId = "CUST-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        } while (customerRepository.findByCustomerId(customerId).isPresent());
+        customer.setCustomerId(customerId);
+
+        // Example Bank Prefix and Branch Code
+        String bankCode = "333";              // MEEWOO internal code
+        String branchCode = "3355";           // Example Kalyani Branch
+        String accountSerial = String.valueOf((long)(Math.random() * 1000000L));  // 6-digit serial
+
+        // Format: bankCode + branchCode + serial (total 12 digits)
+        String accountNumber = bankCode + branchCode + String.format("%06d", Long.parseLong(accountSerial));
+
+        // Format: MEWO + 0 + BranchCode
+        String ifscCode = "MEWO" + branchCode;
+
+
+        // Set generated values
+        customer.setAccountNumber(accountNumber);
+        customer.setIfsCode(ifscCode);
+        customer.setBranchCode(branchCode);
+
+        customer.setPassword(passwordEncoder.encode(customer.getPassword()));
+        customer.setApproved(false); // this for account are pending for approval
+        customer.setAdmin(false); // this is for this user not admin
+
+        return customer;  // Return the updated customer object
+    }
+
+
+
+    @Transactional
+    public Customer register(Customer customer) {
+        // Check for duplicates
+        if (customerRepository.findByMobileNumber(customer.getMobileNumber()).isPresent()) {
+            throw new RuntimeException("Mobile number already registered.");
+        }
+        if (customerRepository.findByEmail(customer.getEmail()).isPresent()) {
+            throw new RuntimeException("Email already registered.");
+        }
+
+        // Store raw password temporarily
+        String rawPassword = customer.getPassword();
+        if (rawPassword == null || rawPassword.isEmpty()) {
+            throw new RuntimeException("Password cannot be empty.");
+        }
+
+        // Generate IDs, Bank Details, Set initial status flags
+        customer = generateBankDetails(customer);
+
+        // HASH the raw password and set it on the customer object
+        customer.setPassword(passwordEncoder.encode(rawPassword));
+
+        // Set initial balance
+        customer.setBalance(500.0);
+
+        // Save the complete customer object
+        Customer savedCustomer = customerRepository.save(customer);
+        return savedCustomer;
+    }
+
+
+    @Transactional // Ensures the whole operation is atomic
+    public Employee createEmployeeFromApplication(JobApplication application, String initialPassword) {
+        // Keep the log message style
+        log.info("Attempting to create EMPLOYEE record from application ID: {}", application.getId());
+
+        // 1. Pre-checks for existing conflicts in BOTH tables
+        // Check Customer Table
+        if (customerRepository.findByEmail(application.getApplicantEmail()).isPresent()) {
+            log.error("Employee creation failed: Email {} already exists in CUSTOMER table.", application.getApplicantEmail());
+            throw new RuntimeException("Email already exists as a customer."); // Keep existing exception type
+        }
+        if (customerRepository.findByMobileNumber(application.getApplicantPhone()).isPresent()) {
+            log.error("Employee creation failed: Mobile number {} already exists in CUSTOMER table.", application.getApplicantPhone());
+            throw new RuntimeException("Mobile number already exists as a customer."); // Keep existing exception type
+        }
+        // Check Employee Table
+        if (employeeRepository.findByEmail(application.getApplicantEmail()).isPresent()) {
+            log.error("Employee creation failed: Email {} already exists in EMPLOYEE table.", application.getApplicantEmail());
+            throw new RuntimeException("Email already exists as an employee."); // Keep existing exception type
+        }
+        if (employeeRepository.findByMobileNumber(application.getApplicantPhone()).isPresent()) {
+            log.error("Employee creation failed: Mobile number {} already exists in EMPLOYEE table.", application.getApplicantPhone());
+            throw new RuntimeException("Mobile number already exists as an employee."); // Keep existing exception type
+        }
+
+        // Check the *provided* initial password (Keep existing logic)
+        if (initialPassword == null || initialPassword.isBlank()) {
+            log.error("Employee creation failed: Initial password cannot be empty for applicant {}", application.getApplicantEmail());
+            throw new IllegalArgumentException("Initial password cannot be empty for new employee.");
+        }
+
+        // 2. Create and populate the NEW Employee object (NOT Customer)
+        Employee employee = new Employee();
+        employee.setFname(application.getApplicantFirstName());
+        employee.setLname(application.getApplicantLastName());
+        employee.setEmail(application.getApplicantEmail());
+        employee.setMobileNumber(application.getApplicantPhone());
+        // Map relevant fields from JobApplication to Employee
+        employee.setJobTitle(application.getDesiredRole()); // Example mapping
+        employee.setHireDate(LocalDate.now()); // Set hire date
+
+        // *** --- START: Employee ID Generation --- ***
+        // 3. Generate a unique Employee ID (Login ID) - Keep existing logic
+        String employeeId; // Changed variable name for clarity
+        do {
+            employeeId = "EMP-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+            // *** Check uniqueness in the EMPLOYEE table ***
+        } while (employeeRepository.findByEmployeeId(employeeId).isPresent());
+        employee.setEmployeeId(employeeId); // Set the generated ID on the Employee object
+        log.debug("Generated unique Employee ID: {}", employeeId);
+        // *** --- END: Employee ID Generation --- ***
+
+        // 4. Remove setting of bank details not present in Employee entity
+        // employee.setAccountNumber(...) // REMOVE
+        // employee.setIfsCode(...)       // REMOVE
+        // employee.setBranchCode(...)    // REMOVE
+        // employee.setBalance(...)       // REMOVE
+
+        // 5. Remove setting of Customer-specific flags
+        // employee.setAdmin(false);      // REMOVE (No isAdmin in Employee entity)
+        // employee.setEmployee(true);    // REMOVE (Implicitly true by being in Employee table)
+        // employee.setApproved(true);    // REMOVE (Handled by accountEnabled in Employee entity)
+
+        // 6. Hash and set the *provided* initial password securely on the Employee object
+        employee.setPassword(passwordEncoder.encode(initialPassword));
+        log.debug("Provided initial password hashed for employee {}", employeeId);
+
+        // 7. Save the new EMPLOYEE record using EmployeeRepository
+        Employee savedEmployee = employeeRepository.save(employee); // Use employeeRepository
+        log.info("Successfully created EMPLOYEE record {} with Employee ID: {}", savedEmployee.getEmail(), savedEmployee.getEmployeeId());
+
+        // 8. Return the newly created EMPLOYEE object
+        return savedEmployee;
+    }
+
+
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\EmployeeService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+import com.Banking_Somnath.banking_systemn.controller.EmployeeController;
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.Transaction;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.repository.TransactionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import java.security.Principal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.Optional;
+@Service
+public class EmployeeService {
+    @Autowired
+    private TransactionService transactionService;
+    private static final Logger log = LoggerFactory.getLogger(EmployeeController.class);
+
+    @Autowired
+    private CustomerRepository customerRepository;
+
+    @Autowired
+    private TransactionRepository transactionRepository;
+
+    // Helper to find customer (handles finding by ID or potentially Account Number)
+    private Optional<Customer> findCustomer(String identifier) {
+        // Try finding by Customer ID first
+        Optional<Customer> customerOpt = customerRepository.findByCustomerId(identifier);
+        if (customerOpt.isEmpty()) {
+            // Optional: Add logic to find by Account Number if needed
+            // customerOpt = customerRepository.findByAccountNumber(identifier);
+        }
+        return customerOpt;
+    }
+
+    @Transactional
+    public String deposit(String targetCustomerId, double amount, String performingEmployeeId) {
+        log.info("Employee {} attempting deposit of {} into account for customer ID {}",
+                performingEmployeeId, amount, targetCustomerId);
+
+        if (amount <= 0) {
+            log.warn("Deposit failed: Amount must be positive. Amount: {}", amount);
+            return "ERROR: Amount must be positive.";
+        }
+
+        Optional<Customer> targetCustomerOpt = findCustomer(targetCustomerId);
+        if (targetCustomerOpt.isEmpty()) {
+            log.warn("Deposit failed: Target customer not found with identifier: {}", targetCustomerId);
+            return "ERROR: Target customer account not found.";
+        }
+
+        Customer targetCustomer = targetCustomerOpt.get();
+
+        // Optional: Check if the target customer account is active/approved
+        if (!targetCustomer.isEnabled()) {
+            log.warn("Deposit failed: Target customer account {} is not active.", targetCustomerId);
+            return "ERROR: Target customer account is not active.";
+        }
+
+        // Perform deposit
+        targetCustomer.setBalance(targetCustomer.getBalance() + amount);
+        customerRepository.save(targetCustomer);
+        log.info("Deposit successful. New balance for customer {}: {}", targetCustomerId, targetCustomer.getBalance());
+
+        // Log transaction
+        Transaction depositTx = new Transaction();
+        depositTx.setCustomerId(targetCustomer.getCustomerId()); // Log against the target customer
+        depositTx.setMobileNo(targetCustomer.getMobileNumber());
+        depositTx.setType("DEPOSIT_BY_EMP");
+        depositTx.setBalance(amount); // Amount deposited
+        depositTx.setDescription("Deposit of ₹" + String.format("%.2f", amount) + " performed by Employee " + performingEmployeeId);
+        depositTx.setLocalDateTime(LocalDateTime.now());
+        depositTx.setSenderAccountNumber(null); // N/A for deposit
+        depositTx.setRecipientAccountNumber(targetCustomer.getAccountNumber());
+        depositTx.setBranchCode(targetCustomer.getBranchCode());
+        depositTx.setIfscCode(targetCustomer.getIfsCode());
+        depositTx.setSenderMobileNo(null);
+        depositTx.setRecipientMobileNo(targetCustomer.getMobileNumber());
+        transactionRepository.save(depositTx);
+        log.info("Deposit transaction logged for customer {}", targetCustomerId);
+
+        return "Deposit successful. ₹" + String.format("%.2f", amount) + " added to account " + targetCustomer.getAccountNumber() + ". New balance: ₹" + String.format("%.2f", targetCustomer.getBalance());
+    }
+
+    @Transactional
+    public String withdraw(String targetCustomerId, double amount, String performingEmployeeId) {
+        log.info("Employee {} attempting withdrawal of {} from account for customer ID {}",
+                performingEmployeeId, amount, targetCustomerId);
+
+        if (amount <= 0) {
+            log.warn("Withdrawal failed: Amount must be positive. Amount: {}", amount);
+            return "ERROR: Amount must be positive.";
+        }
+
+        Optional<Customer> targetCustomerOpt = findCustomer(targetCustomerId);
+        if (targetCustomerOpt.isEmpty()) {
+            log.warn("Withdrawal failed: Target customer not found with identifier: {}", targetCustomerId);
+            return "ERROR: Target customer account not found.";
+        }
+
+        Customer targetCustomer = targetCustomerOpt.get();
+
+        if (!targetCustomer.isEnabled()) {
+            log.warn("Withdrawal failed: Target customer account {} is not active.", targetCustomerId);
+            return "ERROR: Target customer account is not active.";
+        }
+
+        if (targetCustomer.getBalance() < amount) {
+            log.warn("Withdrawal failed: Insufficient balance for customer {}. Required: {}, Available: {}",
+                    targetCustomerId, amount, targetCustomer.getBalance());
+            return "ERROR: Insufficient balance.";
+        }
+
+        // Perform withdrawal
+        targetCustomer.setBalance(targetCustomer.getBalance() - amount);
+        customerRepository.save(targetCustomer);
+        log.info("Withdrawal successful. New balance for customer {}: {}", targetCustomerId, targetCustomer.getBalance());
+
+        // Log transaction
+        Transaction withdrawalTx = new Transaction();
+        withdrawalTx.setCustomerId(targetCustomer.getCustomerId()); // Log against the target customer
+        withdrawalTx.setMobileNo(targetCustomer.getMobileNumber());
+        withdrawalTx.setType("WITHDRAWAL_BY_EMP");
+        withdrawalTx.setBalance(amount); // Amount withdrawn
+        withdrawalTx.setDescription("Withdrawal of ₹" + String.format("%.2f", amount) + " performed by Employee " + performingEmployeeId);
+        withdrawalTx.setLocalDateTime(LocalDateTime.now());
+        withdrawalTx.setSenderAccountNumber(targetCustomer.getAccountNumber());
+        withdrawalTx.setRecipientAccountNumber(null); // N/A for withdrawal
+        withdrawalTx.setBranchCode(targetCustomer.getBranchCode());
+        withdrawalTx.setIfscCode(targetCustomer.getIfsCode());
+        withdrawalTx.setSenderMobileNo(targetCustomer.getMobileNumber());
+        withdrawalTx.setRecipientMobileNo(null);
+        transactionRepository.save(withdrawalTx);
+        log.info("Withdrawal transaction logged for customer {}", targetCustomerId);
+
+        return "Withdrawal successful. ₹" + String.format("%.2f", amount) + " deducted from account " + targetCustomer.getAccountNumber() + ". New balance: ₹" + String.format("%.2f", targetCustomer.getBalance());
+    }
+
+    @Transactional(readOnly = true) // Read-only is sufficient for checking balance
+    public String checkBalance(String targetCustomerId, String performingEmployeeId) {
+        log.info("Employee {} checking balance for customer ID {}", performingEmployeeId, targetCustomerId);
+
+        Optional<Customer> targetCustomerOpt = findCustomer(targetCustomerId);
+        if (targetCustomerOpt.isEmpty()) {
+            log.warn("Check balance failed: Target customer not found with identifier: {}", targetCustomerId);
+            return "ERROR: Target customer account not found.";
+        }
+
+        Customer targetCustomer = targetCustomerOpt.get();
+
+        // Optionally check if active, though viewing might be allowed even if inactive
+        // if (!targetCustomer.isEnabled()) {
+        //     log.warn("Check balance: Target customer account {} is not active.", targetCustomerId);
+        //     return "ERROR: Target customer account is not active.";
+        // }
+
+        log.info("Balance check successful for customer {}. Balance: {}", targetCustomerId, targetCustomer.getBalance());
+        return String.format("%.2f", targetCustomer.getBalance());
+    }
+
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\FixedDepositService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.dto.CustomerBasicInfoDto;
+import com.Banking_Somnath.banking_systemn.dto.FixedDepositAdminViewDto;
+import com.Banking_Somnath.banking_systemn.dto.FixedDepositCustomerViewDto;
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.FixedDeposit;
+import com.Banking_Somnath.banking_systemn.model.FixedDepositStatus;
+import com.Banking_Somnath.banking_systemn.model.Transaction;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.repository.FixedDepositRepository;
+import com.Banking_Somnath.banking_systemn.repository.TransactionRepository;
+import com.Banking_Somnath.banking_systemn.request.CreateFdRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+// import org.hibernate.Hibernate; // Only if explicitly using Hibernate.initialize and not JOIN FETCH
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class FixedDepositService {
+
+    private static final Logger log = LoggerFactory.getLogger(FixedDepositService.class);
+
+    @Autowired
+    private FixedDepositRepository fixedDepositRepository;
+
+    @Autowired
+    private CustomerRepository customerRepository;
+
+    @Autowired
+    private TransactionRepository transactionRepository;
+
+    // --- Interest Rates ---
+    private static final double RATE_FOR_TERM_1_TO_6_MONTHS = 5.0;
+    private static final double RATE_FOR_TERM_7_TO_12_MONTHS = 5.75;
+    private static final double RATE_FOR_TERM_13_TO_24_MONTHS = 6.25;
+    private static final double RATE_FOR_TERM_25_TO_60_MONTHS = 6.75;
+    private static final double RATE_FOR_TERM_ABOVE_60_MONTHS = 7.0;
+
+    /**
+     * Customer applies for a new Fixed Deposit.
+     * Returns a DTO representing the created (pending) FD application.
+     */
+    @Transactional
+    public FixedDepositCustomerViewDto applyForFd(String customerId, CreateFdRequest request) {
+        log.info("Customer {} initiating FD application. Amount: ₹{}, Term: {} months",
+                customerId, request.getPrincipalAmount(), request.getTermInMonths());
+
+        Customer customer = customerRepository.findByCustomerId(customerId)
+                .orElseThrow(() -> {
+                    log.error("FD Application failed: Customer with ID {} not found.", customerId);
+                    return new RuntimeException("Customer not found. Unable to process FD application.");
+                });
+
+        // --- Input Validation ---
+        if (request.getPrincipalAmount() == null || request.getPrincipalAmount() <= 0) {
+            throw new IllegalArgumentException("Principal amount for FD must be a positive value.");
+        }
+        if (request.getPrincipalAmount() < 500.00) {
+            throw new IllegalArgumentException("Minimum Fixed Deposit amount is ₹500.00.");
+        }
+        if (request.getTermInMonths() == null || request.getTermInMonths() <= 0) {
+            throw new IllegalArgumentException("Term in months for FD must be a positive value.");
+        }
+        if (request.getTermInMonths() < 1 || request.getTermInMonths() > 120) {
+            throw new IllegalArgumentException("Fixed Deposit term must be between 1 and 120 months.");
+        }
+
+        double interestRate = determineInterestRateForTerm(request.getTermInMonths());
+
+        FixedDeposit fd = new FixedDeposit();
+        fd.setCustomer(customer);
+        fd.setCustomerId(customerId);
+        fd.setPrincipalAmount(roundToTwoDecimals(request.getPrincipalAmount()));
+        fd.setTermInMonths(request.getTermInMonths());
+        fd.setInterestRate(interestRate);
+        fd.setSourceAccountNumber(customer.getAccountNumber());
+        fd.setStatus(FixedDepositStatus.PENDING);
+        fd.setApplicationDate(LocalDateTime.now());
+        // Maturity date & amount for PENDING can be indicative if needed by DTO,
+        // but official calculation happens on approval based on actual start date.
+        // For PENDING, startDate, maturityDate, maturityAmount are often null in the DTO.
+        // fd.setMaturityDate(LocalDate.now().plusMonths(fd.getTermInMonths())); // Tentative
+        // fd.setMaturityAmount(calculateMaturityAmount(fd.getPrincipalAmount(), fd.getInterestRate(), fd.getTermInMonths())); // Tentative
+
+
+        FixedDeposit savedFd = fixedDepositRepository.save(fd);
+        log.info("FD Application (ID: {}) created successfully for customer {} with PENDING status. Proposed rate: {}% p.a.",
+                savedFd.getId(), customerId, interestRate);
+        return convertToCustomerViewDto(savedFd); // Return DTO for consistency
+    }
+
+    /**
+     * Admin approves a pending Fixed Deposit application.
+     * Returns an AdminViewDTO of the approved FD.
+     */
+    @Transactional
+    public FixedDepositAdminViewDto approveFd(Long fdId, String adminId) {
+        log.info("Admin {} attempting to approve FD application ID: {}", adminId, fdId);
+
+        // Use a repository method that ensures customer is fetched if LAZY for balance check.
+        // findById should work if Customer association in FixedDeposit is EAGER.
+        // If LAZY, prefer custom findByIdWithCustomer(fdId) from repository with JOIN FETCH.
+        FixedDeposit fd = fixedDepositRepository.findById(fdId)
+                .orElseThrow(() -> new RuntimeException("Fixed Deposit application not found with ID: " + fdId));
+
+        if (fd.getStatus() != FixedDepositStatus.PENDING) {
+            log.warn("FD Approval failed for ID {}: Application is not in PENDING status (current: {}).", fdId, fd.getStatus());
+            throw new IllegalStateException("Only Fixed Deposits with PENDING status can be approved.");
+        }
+
+        Customer customer = fd.getCustomer();
+        if (customer == null) { // Should be loaded if association is EAGER or JOIN FETCHED
+            customer = customerRepository.findByCustomerId(fd.getCustomerId())
+                    .orElseThrow(() -> new RuntimeException("Critical Error: Customer (ID: " + fd.getCustomerId() + ") for FD ID " + fdId + " not found."));
+            fd.setCustomer(customer); // Associate if fetched separately
+        }
+        // If Customer is LAZY and not JOIN FETCHED, ensure it's initialized before accessing balance
+        // if (!org.hibernate.Hibernate.isInitialized(customer)) {
+        //     org.hibernate.Hibernate.initialize(customer);
+        // }
+
+        if (customer.getBalance() < fd.getPrincipalAmount()) {
+            throw new RuntimeException("Insufficient balance in customer's account (ID: "
+                    + customer.getCustomerId() + ") to fund the Fixed Deposit of ₹" + fd.getPrincipalAmount() + ".");
+        }
+
+        customer.setBalance(roundToTwoDecimals(customer.getBalance() - fd.getPrincipalAmount()));
+        customerRepository.save(customer);
+        log.info("Successfully debited ₹{} from customer {} (Account: {}) for FD ID {}. New balance: ₹{}",
+                fd.getPrincipalAmount(), customer.getCustomerId(), customer.getAccountNumber(), fdId, customer.getBalance());
+
+        Transaction debitTransaction = new Transaction();
+        debitTransaction.setCustomerId(customer.getCustomerId());
+        debitTransaction.setMobileNo(customer.getMobileNumber());
+        debitTransaction.setType("FD_ACCOUNT_DEBIT");
+        debitTransaction.setBalance(fd.getPrincipalAmount());
+        debitTransaction.setDescription("Debit for activation of Fixed Deposit (ID: " + fd.getId() + ")");
+        debitTransaction.setLocalDateTime(LocalDateTime.now());
+        debitTransaction.setSenderAccountNumber(customer.getAccountNumber());
+        debitTransaction.setBranchCode(customer.getBranchCode());
+        debitTransaction.setIfscCode(customer.getIfsCode());
+        transactionRepository.save(debitTransaction);
+        log.info("FD debit transaction logged successfully for FD ID: {}", fd.getId());
+
+        LocalDate actualStartDate = LocalDate.now();
+        fd.setStartDate(actualStartDate);
+        fd.setMaturityDate(actualStartDate.plusMonths(fd.getTermInMonths()));
+        fd.setMaturityAmount(calculateMaturityAmount(fd.getPrincipalAmount(), fd.getInterestRate(), fd.getTermInMonths()));
+        fd.setStatus(FixedDepositStatus.ACTIVE);
+        fd.setActionDate(LocalDateTime.now());
+        fd.setActionByAdminId(adminId);
+        fd.setRejectionReason(null);
+
+        FixedDeposit approvedFd = fixedDepositRepository.save(fd);
+        return convertToAdminViewDto(approvedFd);
+    }
+
+    /**
+     * Admin rejects a pending Fixed Deposit application.
+     * Returns an AdminViewDTO of the rejected FD.
+     */
+    @Transactional
+    public FixedDepositAdminViewDto rejectFd(Long fdId, String adminId, String reason) {
+        log.info("Admin {} attempting to reject FD application ID: {} with reason: {}", adminId, fdId, reason);
+        FixedDeposit fd = fixedDepositRepository.findById(fdId)
+                .orElseThrow(() -> new RuntimeException("Fixed Deposit application not found with ID: " + fdId));
+
+        if (fd.getStatus() != FixedDepositStatus.PENDING) {
+            log.warn("FD Rejection failed for ID {}: Application is not in PENDING status (current: {}).", fdId, fd.getStatus());
+            throw new IllegalStateException("Only Fixed Deposits with PENDING status can be rejected.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Rejection reason cannot be empty.");
+        }
+        if (reason.length() > 500) {
+            throw new IllegalArgumentException("Rejection reason is too long (max 500 characters).");
+        }
+
+        fd.setStatus(FixedDepositStatus.REJECTED);
+        fd.setActionDate(LocalDateTime.now());
+        fd.setActionByAdminId(adminId);
+        fd.setRejectionReason(reason.trim());
+        // Ensure customer is loaded for DTO conversion, if not already by findById
+        if (fd.getCustomer() == null) {
+            customerRepository.findByCustomerId(fd.getCustomerId()).ifPresent(fd::setCustomer);
+        }
+
+
+        FixedDeposit rejectedFd = fixedDepositRepository.save(fd);
+        return convertToAdminViewDto(rejectedFd);
+    }
+
+    /**
+     * Retrieves all Fixed Deposits for a specific customer as DTOs.
+     */
+    @Transactional(readOnly = true)
+    public List<FixedDepositCustomerViewDto> getFdsByCustomerIdDto(String customerId) {
+        log.debug("Fetching all FDs for customer ID {} as DTOs", customerId);
+        customerRepository.findByCustomerId(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found. Cannot fetch FDs."));
+
+        // Use the repository method with JOIN FETCH for customer if you created one
+        // List<FixedDeposit> fds = fixedDepositRepository.findByCustomerIdWithCustomerOrderByApplicationDateDesc(customerId);
+        // Otherwise, if FixedDeposit.customer is EAGER or handled by default fetch plan:
+        List<FixedDeposit> fds = fixedDepositRepository.findByStatusWithCustomerOrderByApplicationDateAsc(FixedDepositStatus.valueOf(customerId));
+        return fds.stream().map(this::convertToCustomerViewDto).collect(Collectors.toList());
+    }
+
+    /**
+     * Retrieves PENDING Fixed Deposit applications as DTOs for admin view.
+     * This method now uses the repository method with JOIN FETCH to ensure customer details are loaded.
+     */
+    @Transactional(readOnly = true)
+    public List<FixedDepositAdminViewDto> getPendingFdApplicationsForAdmin() {
+        log.debug("Fetching PENDING FD applications for Admin View DTOs");
+        List<FixedDeposit> pendingFds = fixedDepositRepository.findByStatusWithCustomerOrderByApplicationDateAsc(FixedDepositStatus.PENDING);
+        return pendingFds.stream()
+                .map(this::convertToAdminViewDto)
+                .collect(Collectors.toList());
+    }
+
+    // --- DTO Conversion Helpers ---
+    private FixedDepositAdminViewDto convertToAdminViewDto(FixedDeposit fd) {
+        if (fd == null) return null;
+        Customer customer = fd.getCustomer(); // Expected to be initialized due to JOIN FETCH or EAGER loading
+        CustomerBasicInfoDto customerInfoDto;
+
+        if (customer != null) {
+            customerInfoDto = new CustomerBasicInfoDto(
+                    customer.getCustomerId(),
+                    customer.getFname() + " " + customer.getLname(),
+                    customer.getMobileNumber(),
+                    customer.getEmail()
+            );
+        } else {
+            log.warn("Customer object was null for FD ID: {}. Using customerId from FD for DTO.", fd.getId());
+            // Attempt a fallback, though this indicates a potential issue in data loading strategy
+            Customer fallbackCustomer = customerRepository.findByCustomerId(fd.getCustomerId()).orElse(null);
+            if (fallbackCustomer != null) {
+                customerInfoDto = new CustomerBasicInfoDto(
+                        fallbackCustomer.getCustomerId(),
+                        fallbackCustomer.getFname() + " " + fallbackCustomer.getLname(),
+                        fallbackCustomer.getMobileNumber(),
+                        fallbackCustomer.getEmail()
+                );
+            } else {
+                customerInfoDto = new CustomerBasicInfoDto(fd.getCustomerId(), "Customer Data Unavailable", "N/A", "N/A");
+            }
+        }
+
+        return new FixedDepositAdminViewDto(
+                fd.getId(),
+                customerInfoDto,
+                fd.getPrincipalAmount(),
+                fd.getTermInMonths(),
+                fd.getInterestRate(),
+                fd.getApplicationDate(),
+                fd.getStatus(),
+                fd.getSourceAccountNumber()
+        );
+    }
+
+    private FixedDepositCustomerViewDto convertToCustomerViewDto(FixedDeposit fd) {
+        if (fd == null) return null;
+        return new FixedDepositCustomerViewDto(
+                fd.getId(),
+                fd.getPrincipalAmount(),
+                fd.getInterestRate(),
+                fd.getTermInMonths(),
+                fd.getStartDate(), // Will be null for PENDING/REJECTED
+                fd.getMaturityDate(), // Will be null for PENDING/REJECTED, or based on app date if PENDING
+                fd.getMaturityAmount(), // Will be null for PENDING/REJECTED
+                fd.getStatus(),
+                fd.getApplicationDate(),
+                fd.getRejectionReason(),
+                fd.getSourceAccountNumber()
+        );
+    }
+
+    // --- Private Helper Methods for Calculations ---
+    private double determineInterestRateForTerm(int termInMonths) {
+        if (termInMonths > 60) return RATE_FOR_TERM_ABOVE_60_MONTHS;
+        if (termInMonths >= 25) return RATE_FOR_TERM_25_TO_60_MONTHS;
+        if (termInMonths >= 13) return RATE_FOR_TERM_13_TO_24_MONTHS;
+        if (termInMonths >= 7) return RATE_FOR_TERM_7_TO_12_MONTHS;
+        if (termInMonths >= 1) return RATE_FOR_TERM_1_TO_6_MONTHS;
+        log.warn("Unsupported FD term for rate calculation: {} months. Returning lowest tier rate.", termInMonths);
+        return RATE_FOR_TERM_1_TO_6_MONTHS;
+    }
+
+    private double calculateMaturityAmount(double principal, double annualRatePercent, int termInMonths) {
+        double rateDecimal = annualRatePercent / 100.0;
+        double termInYears = (double) termInMonths / 12.0;
+        // Simple Interest: Interest = P * R * T; Maturity = P + Interest
+        double interestEarned = principal * rateDecimal * termInYears;
+        double maturityAmount = principal + interestEarned;
+        return roundToTwoDecimals(maturityAmount);
+    }
+
+    private double roundToTwoDecimals(double value) {
+        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\JobApplicationService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.model.ApplicationStatus;
+import com.Banking_Somnath.banking_systemn.model.Employee;
+import com.Banking_Somnath.banking_systemn.model.JobApplication;
+import com.Banking_Somnath.banking_systemn.repository.JobApplicationRepository;
+import com.Banking_Somnath.banking_systemn.request.JobApplicationRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+@Service
+public class JobApplicationService {
+    @Autowired
+    JobApplicationRepository jobApplicationRepository;
+    @Autowired
+    CustomerService customerService;
+
+    @Transactional
+    public JobApplication submitApplication(JobApplicationRequest request) {
+        JobApplication application = new JobApplication();
+        application.setApplicantFirstName(request.getApplicantFirstName());
+        application.setApplicantLastName(request.getApplicantLastName());
+        application.setApplicantEmail(request.getApplicantEmail());
+        application.setApplicantPhone(request.getApplicantPhone());
+        application.setQualifications(request.getQualifications());
+        application.setExperience(request.getExperience());
+        application.setDesiredRole(request.getDesiredRole());
+        application.setResumeLink(request.getResumeLink());
+        // applicationDate and status are set in constructor
+
+        return jobApplicationRepository.save(application);
+    }
+
+    @Transactional(readOnly = true)
+    public List<JobApplication> getAllApplications() {
+        return jobApplicationRepository.findAllByOrderByApplicationDateDesc();
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<JobApplication> getApplicationById(Long id) {
+        return jobApplicationRepository.findById(id);
+    }
+
+
+    @Transactional
+    public JobApplication scheduleInterview(Long appId, LocalDateTime interviewDate, String adminId) {
+        JobApplication app = jobApplicationRepository.findById(appId)
+                .orElseThrow(() -> new RuntimeException("Application not found: " + appId));
+
+        app.setStatus(ApplicationStatus.INTERVIEW_SCHEDULED);
+        app.setInterviewDate(interviewDate);
+        app.setReviewerAdminId(adminId); // Track who scheduled it
+        app.setAdminNotes("Interview scheduled by " + adminId + " for " + interviewDate.toString()); // Example note
+        return jobApplicationRepository.save(app);
+    }
+
+    @Transactional
+    public JobApplication rejectApplication(Long appId, String reason, String adminId) {
+        JobApplication app = jobApplicationRepository.findById(appId)
+                .orElseThrow(() -> new RuntimeException("Application not found: " + appId));
+
+        app.setStatus(ApplicationStatus.REJECTED);
+        app.setReviewerAdminId(adminId);
+        app.setAdminNotes("Application rejected by " + adminId + ". Reason: " + reason);
+        return jobApplicationRepository.save(app);
+    }
+
+    // --- Keep previous methods (submitApplication, etc.) AS IS ---
+
+    @Transactional
+    public JobApplication approveHire(Long appId, String adminId) {
+        JobApplication app = jobApplicationRepository.findById(appId)
+                .orElseThrow(() -> new RuntimeException("Application not found: " + appId));
+
+        if(app.getStatus() == ApplicationStatus.HIRED) {
+            throw new RuntimeException("Application already marked as hired.");
+        }
+
+        String initialPassword = "DefaultPassword123!"; // Keep using the provided password
+
+        // --- START: Minimal Change Area ---
+        Employee createdEmployee; // Variable to hold the returned Employee object
+        try {
+            // Call the CustomerService method which now CREATES and RETURNS an Employee
+            // This implicitly uses EmployeeRepository inside CustomerService
+            createdEmployee = customerService.createEmployeeFromApplication(app, initialPassword);
+
+        } catch(Exception e) {
+            // Keep existing exception handling
+            throw new RuntimeException("Failed to create employee user account: " + e.getMessage(), e);
+        }
+        // --- END: Minimal Change Area ---
+
+
+        // Update application status only after successful user creation
+        app.setStatus(ApplicationStatus.HIRED);
+        app.setReviewerAdminId(adminId); // Keep tracking admin
+
+        // *** Update Admin Notes to use the Employee ID from the createdEmployee object ***
+        app.setAdminNotes("Hired by " + adminId + ". Employee record created. Employee ID: " + createdEmployee.getEmployeeId()); // Use getEmployeeId()
+
+        // *** This line uses JobApplicationRepository and remains UNCHANGED ***
+        // It saves the updated JobApplication entity (app)
+        return jobApplicationRepository.save(app);
+    }
+
+    // --- Keep other methods AS IS ---
+}
+
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\LoanService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.LoanApplication;
+import com.Banking_Somnath.banking_systemn.model.LoanApplicationStatus;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.repository.LoanApplicationRepository;
+import com.Banking_Somnath.banking_systemn.request.ApproveLoanRequest;
+import com.Banking_Somnath.banking_systemn.request.CreateLoanRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+
+@Service
+public class LoanService {
+
+    private static final Logger log = LoggerFactory.getLogger(LoanService.class);
+
+    @Autowired
+    private LoanApplicationRepository loanApplicationRepository;
+
+    @Autowired
+    private CustomerRepository customerRepository; // Needed to check if customer exists
+
+    // Constants for allowed statuses for admin actions
+    private static final List<LoanApplicationStatus> ACTIONABLE_STATUSES = Arrays.asList(
+            LoanApplicationStatus.PENDING,
+            LoanApplicationStatus.UNDER_REVIEW
+    );
+
+    /**
+     * Customer applies for a new Loan.
+     * Creates a LoanApplication record with PENDING status.
+     */
+    @Transactional
+    public LoanApplication applyForLoan(String customerId, CreateLoanRequest request) {
+        log.info("Customer {} applying for {} loan. Amount: {}, Term: {} months",
+                customerId, request.getLoanType(), request.getRequestedAmount(), request.getTermInMonths());
+
+        // 1. Ensure customer exists
+        customerRepository.findByCustomerId(customerId)
+                .orElseThrow(() -> {
+                    log.error("Loan Application failed: Customer {} not found.", customerId);
+                    return new RuntimeException("Customer not found. Cannot apply for loan.");
+                });
+
+        // 2. Input Validation (Basic - add more specific checks as needed)
+        if (request.getLoanType() == null || request.getLoanType().isBlank()) {
+            throw new IllegalArgumentException("Loan type is required.");
+        }
+        if (request.getRequestedAmount() == null || request.getRequestedAmount() <= 0) {
+            throw new IllegalArgumentException("Requested loan amount must be positive.");
+        }
+        // Example: Check against a minimum loan amount
+        if (request.getRequestedAmount() < 1000) {
+            throw new IllegalArgumentException("Minimum loan amount is ₹1000.");
+        }
+        if (request.getTermInMonths() == null || request.getTermInMonths() <= 0) {
+            throw new IllegalArgumentException("Loan term must be positive (in months).");
+        }
+        // Example: Check against allowed terms
+        if (request.getTermInMonths() < 6 || request.getTermInMonths() > 120) {
+            throw new IllegalArgumentException("Loan term must be between 6 and 120 months.");
+        }
+        if (request.getPurpose() == null || request.getPurpose().isBlank()) {
+            throw new IllegalArgumentException("Loan purpose is required.");
+        }
+        // Validate optional fields if needed (e.g., income must be non-negative if provided)
+        if (request.getMonthlyIncome() != null && request.getMonthlyIncome() < 0) {
+            throw new IllegalArgumentException("Monthly income cannot be negative.");
+        }
+
+
+        // 3. Create Loan Application Entity
+        LoanApplication loanApp = new LoanApplication();
+        loanApp.setCustomerId(customerId);
+        loanApp.setLoanType(request.getLoanType().trim().toUpperCase()); // Standardize type
+        loanApp.setRequestedAmount(request.getRequestedAmount());
+        loanApp.setTermInMonths(request.getTermInMonths());
+        loanApp.setPurpose(request.getPurpose().trim());
+        loanApp.setMonthlyIncome(request.getMonthlyIncome()); // Optional
+        loanApp.setEmploymentStatus(request.getEmploymentStatus()); // Optional
+        loanApp.setStatus(LoanApplicationStatus.PENDING); // Initial status
+        loanApp.setApplicationDate(LocalDateTime.now());
+
+        // 4. Save and Return
+        LoanApplication savedLoanApp = loanApplicationRepository.save(loanApp);
+        log.info("Loan Application {} created successfully for customer {} with PENDING status.", savedLoanApp.getId(), customerId);
+        return savedLoanApp;
+    }
+
+    /**
+     * Admin approves a pending Loan application.
+     * Updates status to APPROVED, sets approval details.
+     * Note: Disbursement is a separate step NOT handled here.
+     */
+    @Transactional
+    public LoanApplication approveLoan(Long loanId, String adminId, ApproveLoanRequest approveDetails) {
+        log.info("Admin {} attempting to approve Loan application {}", adminId, loanId);
+
+        // 1. Find the loan application
+        LoanApplication loanApp = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new RuntimeException("Loan application not found with ID: " + loanId));
+
+        // 2. Validate current status
+        if (!ACTIONABLE_STATUSES.contains(loanApp.getStatus())) {
+            log.warn("Approval failed: Loan App {} is not in an actionable status (current: {}).", loanId, loanApp.getStatus());
+            throw new IllegalStateException("Loan Application cannot be approved from its current status: " + loanApp.getStatus());
+        }
+
+        // 3. Validate Approval Details from Admin
+        if (approveDetails.getApprovedAmount() == null || approveDetails.getApprovedAmount() <= 0) {
+            throw new IllegalArgumentException("Approved amount must be positive.");
+        }
+        // Example: Minimum interest rate check
+        if (approveDetails.getInterestRate() == null || approveDetails.getInterestRate() <= 0.1) {
+            throw new IllegalArgumentException("Interest rate must be positive (e.g., greater than 0.1%).");
+        }
+        // Optional: Policy check - Approved amount shouldn't drastically exceed requested?
+        if (approveDetails.getApprovedAmount() > loanApp.getRequestedAmount() * 1.1) { // e.g., max 10% over requested
+            log.warn("Admin {} approved loan {} for significantly more (₹{}) than requested (₹{}).",
+                    adminId, loanId, approveDetails.getApprovedAmount(), loanApp.getRequestedAmount());
+            // Potentially throw error or just log based on bank policy
+        }
+
+        // 4. Update Loan Application Status and Details
+        loanApp.setStatus(LoanApplicationStatus.APPROVED);
+        loanApp.setApprovedAmount(approveDetails.getApprovedAmount());
+        loanApp.setInterestRate(approveDetails.getInterestRate());
+        loanApp.setApprovalDate(LocalDateTime.now());
+        loanApp.setApprovedByAdminId(adminId); // Log the admin who approved
+        loanApp.setRejectionReason(null); // Clear rejection reason if any
+
+        // 5. Save and Return
+        LoanApplication approvedLoanApp = loanApplicationRepository.save(loanApp);
+        log.info("Loan Application {} approved successfully by admin {}. Approved Amount: ₹{}, Rate: {}%",
+                loanId, adminId, approvedLoanApp.getApprovedAmount(), approvedLoanApp.getInterestRate());
+        return approvedLoanApp;
+    }
+
+    /**
+     * Admin rejects a pending Loan application.
+     */
+    @Transactional
+    public LoanApplication rejectLoan(Long loanId, String adminId, String reason) {
+        log.info("Admin {} attempting to reject Loan application {} with reason: {}", adminId, loanId, reason);
+
+        // 1. Find the loan application
+        LoanApplication loanApp = loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new RuntimeException("Loan application not found with ID: " + loanId));
+
+        // 2. Validate current status
+        if (!ACTIONABLE_STATUSES.contains(loanApp.getStatus())) {
+            log.warn("Rejection failed: Loan App {} is not in an actionable status (current: {}).", loanId, loanApp.getStatus());
+            throw new IllegalStateException("Loan Application cannot be rejected from its current status: " + loanApp.getStatus());
+        }
+
+        // 3. Validate Rejection Reason
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("Rejection reason cannot be empty.");
+        }
+
+        // 4. Update Loan Application Status and Details
+        loanApp.setStatus(LoanApplicationStatus.REJECTED);
+        loanApp.setApprovedByAdminId(adminId); // Log who rejected it
+        loanApp.setRejectionReason(reason.trim());
+        // Clear approval details if somehow set previously
+        loanApp.setApprovedAmount(null);
+        loanApp.setInterestRate(null);
+        loanApp.setApprovalDate(null);
+
+        // 5. Save and Return
+        LoanApplication rejectedLoanApp = loanApplicationRepository.save(loanApp);
+        log.info("Loan Application {} rejected successfully by admin {}.", loanId, adminId);
+        return rejectedLoanApp;
+    }
+
+    /**
+     * Get all Loan Applications for a specific customer.
+     */
+    @Transactional(readOnly = true)
+    public List<LoanApplication> getLoansByCustomer(String customerId) {
+        log.debug("Fetching Loan Applications for customer {}", customerId);
+        // Ensure customer exists before querying? Optional check.
+        customerRepository.findByCustomerId(customerId)
+                .orElseThrow(() -> new RuntimeException("Customer not found. Cannot fetch loans."));
+        return loanApplicationRepository.findByCustomerIdOrderByApplicationDateDesc(customerId);
+    }
+
+    /**
+     * Get all Loan Applications with actionable statuses (PENDING, UNDER_REVIEW) for admin view.
+     */
+    @Transactional(readOnly = true)
+    public List<LoanApplication> getPendingLoanApplications() {
+        log.debug("Fetching Loan Applications with actionable statuses: {}", ACTIONABLE_STATUSES);
+        return loanApplicationRepository.findByStatusInOrderByApplicationDateAsc(ACTIONABLE_STATUSES);
+        // Or if only PENDING:
+        // return loanApplicationRepository.findByStatusOrderByApplicationDateAsc(LoanApplicationStatus.PENDING);
+    }
+
+    // Optional: Method to get loan by ID if needed elsewhere
+    @Transactional(readOnly = true)
+    public LoanApplication getLoanApplicationById(Long loanId) {
+        log.debug("Fetching loan application by ID: {}", loanId);
+        return loanApplicationRepository.findById(loanId)
+                .orElseThrow(() -> new RuntimeException("Loan application not found with ID: " + loanId));
+    }
+}
+
+--- main\java\com\Banking_Somnath\banking_systemn\service\TransactionService.java ---
+package com.Banking_Somnath.banking_systemn.service;
+
+import com.Banking_Somnath.banking_systemn.model.Customer;
+import com.Banking_Somnath.banking_systemn.model.Transaction;
+import com.Banking_Somnath.banking_systemn.repository.CustomerRepository;
+import com.Banking_Somnath.banking_systemn.repository.TransactionRepository;
+import com.Banking_Somnath.banking_systemn.request.TransferMoney;
+import com.itextpdf.text.*;
+import com.itextpdf.text.pdf.PdfPCell;
+import com.itextpdf.text.pdf.PdfPTable;
+import com.itextpdf.text.pdf.PdfWriter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.ByteArrayOutputStream;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Optional;
+@Service
+public class TransactionService {
+
+    @Autowired
+    CustomerRepository customerRepository;
+
+    @Autowired
+    PasswordEncoder passwordEncoder;
+
+    @Autowired
+    TransactionRepository transactionRepository;
+
+    private static final Logger log = LoggerFactory.getLogger(TransactionService.class);
+
+
+    public String getBalance(String customerId) {
+
+
+        Optional<Customer> customerList = customerRepository.findByCustomerId(customerId);
+        System.out.println("✅ Looking for customer ID: " + customerId);
+
+        if (!customerList.isEmpty()) {
+            Customer c = customerList.get();
+            System.out.println("✅ Found customer: " + c.getCustomerId() + ", Balance: " + c.getBalance());
+            return String.format("%.2f", c.getBalance());
+        } else {
+            System.out.println("❌ Customer not found.");
+            return "ERROR:Customer_Not_Found";
+        }
+    }
+
+    @Transactional
+    public String Transfer(Customer sender, TransferMoney transferMoney){
+
+        double amount = transferMoney.getAmount();
+//        String senderPassword = transferMoney.getSenderPassword(); // <--- UNCOMMENTED
+        String receiverCustomerId= transferMoney.getReceiverCustomerId();
+        String receiverMobileNo= transferMoney.getReceiverMobileNo();
+
+        log.info("Attempting transfer from {} to {} (Mobile: {}) amount: {}", sender.getCustomerId(), receiverCustomerId, receiverMobileNo, amount);
+        if (amount <= 0) { // Use <= 0 for validation
+            log.warn("Transfer failed: Amount must be positive. Amount: {}", amount);
+            return "ERROR:Amount must be positive";
+        }
+
+        // Re-enabled password check
+//        if (senderPassword == null || senderPassword.trim().isEmpty()) { // Good practice to check if password was provided
+//            log.warn("Transfer failed: Sender password not provided by {}", sender.getCustomerId());
+//            return "ERROR:Password is required for transfer.";
+//        }
+//        if (!passwordEncoder.matches(senderPassword, sender.getPassword())) { // <--- UNCOMMENTED
+//            log.warn("Transfer failed: Incorrect password for sender {}", sender.getCustomerId());
+//            return "ERROR:Incorrect password!";
+//        }
+
+        if (sender.getBalance() < amount) {
+            log.warn("Transfer failed: Insufficient balance for sender {}. Required: {}, Available: {}", sender.getCustomerId(), amount, sender.getBalance());
+            return "ERROR:Insufficient balance!";
+        }
+
+        if (sender.getCustomerId().equals(receiverCustomerId)) {
+            log.warn("Transfer failed: Sender {} attempting to transfer to self.", sender.getCustomerId());
+            return "ERROR:Cannot transfer to yourself.";
+        }
+
+        Optional<Customer> receiverOpt = customerRepository.findByCustomerId(receiverCustomerId);
+        if (receiverOpt.isEmpty()) {
+            log.warn("Transfer failed: Receiver account not found with Customer ID: {}", receiverCustomerId);
+            return "ERROR:Receiver account not found.";
+        }
+
+        Customer receiver = receiverOpt.get();
+        // Add mobile number validation as an extra check
+        if (!receiver.getMobileNumber().equals(receiverMobileNo)) {
+            log.warn("Transfer failed: Receiver details mismatch for Customer ID: {}. Expected Mobile: {}, Provided: {}", receiverCustomerId, receiver.getMobileNumber(), receiverMobileNo);
+            return "ERROR:Receiver details mismatch.";
+        }
+
+        sender.setBalance(sender.getBalance() - amount);
+        receiver.setBalance(receiver.getBalance() + amount);
+        customerRepository.save(sender);
+        customerRepository.save(receiver);
+        log.info("Balances updated successfully for sender {} and receiver {}.", sender.getCustomerId(), receiver.getCustomerId());
+
+
+        Transaction senderTx = new Transaction();
+        senderTx.setCustomerId(sender.getCustomerId()); // Sender's Customer ID
+        senderTx.setMobileNo(sender.getMobileNumber()); // Use relevant mobile number
+        senderTx.setType("TRANSFER_OUT"); // Use clearer type
+        senderTx.setBalance(amount); // Record the transaction amount
+        senderTx.setDescription("Transferred ₹" + String.format("%.2f", amount) + " to " + receiver.getCustomerId() + " (Acc: " + receiver.getAccountNumber() + ")");
+        senderTx.setLocalDateTime(LocalDateTime.now());
+        senderTx.setSenderAccountNumber(sender.getAccountNumber());
+        senderTx.setRecipientAccountNumber(receiver.getAccountNumber());
+        senderTx.setBranchCode(sender.getBranchCode()); // Sender's branch context might be relevant
+        senderTx.setIfscCode(sender.getIfsCode());     // Sender's IFSC context
+        senderTx.setSenderMobileNo(sender.getMobileNumber());
+        senderTx.setRecipientMobileNo(receiver.getMobileNumber());
+        transactionRepository.save(senderTx);
+        log.info("Saved sender transaction record for {}.", sender.getCustomerId());
+
+        // Receiver Transaction Record
+        Transaction receiverTx = new Transaction();
+        receiverTx.setCustomerId(receiver.getCustomerId());
+        receiverTx.setMobileNo(receiver.getMobileNumber());
+        receiverTx.setType("TRANSFER_IN");
+        receiverTx.setBalance(amount);
+        receiverTx.setDescription("Received ₹" + String.format("%.2f", amount) + " from " + sender.getCustomerId() + " (Acc: " + sender.getAccountNumber() + ")");
+        receiverTx.setLocalDateTime(LocalDateTime.now());
+        receiverTx.setSenderAccountNumber(sender.getAccountNumber());
+        receiverTx.setRecipientAccountNumber(receiver.getAccountNumber());
+        receiverTx.setBranchCode(receiver.getBranchCode()); // Receiver's branch context (should be receiver.getBranchCode())
+        receiverTx.setIfscCode(receiver.getIfsCode());     // Receiver's IFSC context (should be receiver.getIfsCode())
+        receiverTx.setSenderMobileNo(sender.getMobileNumber());
+        receiverTx.setRecipientMobileNo(receiver.getMobileNumber());
+        transactionRepository.save(receiverTx);
+        log.info("Saved receiver transaction record for {}.", receiver.getCustomerId());
+
+        return "Money transfer successful. ₹" + String.format("%.2f", amount) + " has been transferred to " + receiver.getCustomerId();
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] generateTransactionHistoryPdf(String customerId, LocalDate startDate, LocalDate endDate) throws Exception {
+        log.info("Generating transaction history PDF for Customer ID: {} from {} to {}", customerId, startDate, endDate);
+
+        Optional<Customer> customerOpt = customerRepository.findByCustomerId(customerId);
+        if (customerOpt.isEmpty()) {
+            log.error("Customer details not found for PDF generation: {}", customerId);
+            throw new RuntimeException("Customer details not found for PDF generation: " + customerId);
+        }
+        Customer customer = customerOpt.get();
+
+        LocalDateTime startDateTime = startDate.atStartOfDay();
+        LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX); // Ensure end date is inclusive
+
+        log.debug("Querying transactions between {} and {}", startDateTime, endDateTime);
+
+        // Fetch transactions for the customer within the date range
+        List<Transaction> transactions = transactionRepository.findByCustomerIdAndLocalDateTimeBetweenOrderByLocalDateTimeDesc(
+                customerId,
+                startDateTime,
+                endDateTime
+        );
+
+        log.info("Found {} transactions for Customer ID: {}", transactions.size(), customerId);
+
+        // --- PDF Generation Logic ---
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        Document document = new Document(PageSize.A4, 36, 36, 54, 36); // Added margins (left, right, top, bottom)
+        try {
+            PdfWriter writer = PdfWriter.getInstance(document, baos);
+            // Optional: Add Header/Footer Events for page numbers etc. (more advanced)
+            document.open();
+
+            // Fonts
+            Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 16, BaseColor.DARK_GRAY);
+            Font headerFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 10, BaseColor.WHITE);
+            Font infoFont = FontFactory.getFont(FontFactory.HELVETICA, 10, BaseColor.BLACK);
+            Font dataFont = FontFactory.getFont(FontFactory.HELVETICA, 9, BaseColor.BLACK);
+            Font footerFont = FontFactory.getFont(FontFactory.HELVETICA, 8, Font.ITALIC, BaseColor.GRAY);
+
+            // Title Section
+            Paragraph title = new Paragraph("Transaction History", titleFont);
+            title.setAlignment(Element.ALIGN_CENTER);
+            document.add(title);
+
+            DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("dd-MMM-yyyy");
+            Paragraph dateRange = new Paragraph(
+                    "For Period: " + startDate.format(dateFormatter) + " to " + endDate.format(dateFormatter),
+                    infoFont);
+            dateRange.setAlignment(Element.ALIGN_CENTER);
+            dateRange.setSpacingAfter(10f);
+            document.add(dateRange);
+
+
+            // Customer Information Section
+            PdfPTable infoTable = new PdfPTable(2);
+            infoTable.setWidthPercentage(100);
+            infoTable.setWidths(new float[]{1f, 3f});
+            infoTable.setSpacingAfter(15f);
+            infoTable.getDefaultCell().setBorder(Rectangle.NO_BORDER); // No borders for info table cells
+
+            infoTable.addCell(new Phrase("Customer Name:", infoFont));
+            infoTable.addCell(new Phrase(customer.getFname() + " " + customer.getLname(), infoFont));
+            infoTable.addCell(new Phrase("Customer ID:", infoFont));
+            infoTable.addCell(new Phrase(customer.getCustomerId(), infoFont));
+            infoTable.addCell(new Phrase("Account Number:", infoFont));
+            infoTable.addCell(new Phrase(customer.getAccountNumber(), infoFont));
+            infoTable.addCell(new Phrase("Mobile Number:", infoFont));
+            infoTable.addCell(new Phrase(customer.getMobileNumber(), infoFont));
+            // Optional: Add current balance if needed, but statement usually shows transactions
+            // infoTable.addCell(new Phrase("Balance as of " + LocalDate.now().format(dateFormatter) + ":", infoFont));
+            // infoTable.addCell(new Phrase("₹" + String.format("%.2f", customer.getBalance()), infoFont));
+            document.add(infoTable);
+
+
+            // Transactions Table
+            if (transactions.isEmpty()) {
+                Paragraph noData = new Paragraph("No transactions found for the selected period.", infoFont);
+                noData.setAlignment(Element.ALIGN_CENTER);
+                document.add(noData);
+            } else {
+                PdfPTable table = new PdfPTable(5); // Date/Time, Description, Type, Amount, Counterparty/Details
+                table.setWidthPercentage(100);
+                table.setSpacingBefore(10f);
+                table.setWidths(new float[]{2f, 3.5f, 1.5f, 1.5f, 2.5f}); // Adjusted widths
+
+                // Table Header
+                PdfPCell cell = new PdfPCell(new Phrase("Date & Time", headerFont));
+                cell.setBackgroundColor(BaseColor.DARK_GRAY); cell.setHorizontalAlignment(Element.ALIGN_CENTER); cell.setPadding(5); table.addCell(cell);
+                cell = new PdfPCell(new Phrase("Description", headerFont));
+                cell.setBackgroundColor(BaseColor.DARK_GRAY); cell.setHorizontalAlignment(Element.ALIGN_CENTER); cell.setPadding(5); table.addCell(cell);
+                cell = new PdfPCell(new Phrase("Type", headerFont));
+                cell.setBackgroundColor(BaseColor.DARK_GRAY); cell.setHorizontalAlignment(Element.ALIGN_CENTER); cell.setPadding(5); table.addCell(cell);
+                cell = new PdfPCell(new Phrase("Amount (₹)", headerFont));
+                cell.setBackgroundColor(BaseColor.DARK_GRAY); cell.setHorizontalAlignment(Element.ALIGN_CENTER); cell.setPadding(5); table.addCell(cell);
+                cell = new PdfPCell(new Phrase("Details", headerFont));
+                cell.setBackgroundColor(BaseColor.DARK_GRAY); cell.setHorizontalAlignment(Element.ALIGN_CENTER); cell.setPadding(5); table.addCell(cell);
+                table.setHeaderRows(1);
+
+                // Table Data
+                DateTimeFormatter tableDateFormatter = DateTimeFormatter.ofPattern("dd-MM-yy HH:mm:ss");
+                BaseColor creditColor = new BaseColor(0, 128, 0); // Green
+                BaseColor debitColor = BaseColor.RED;
+
+                for (Transaction tx : transactions) {
+                    // Date/Time
+                    PdfPCell dataCell = new PdfPCell(new Phrase(tx.getLocalDateTime().format(tableDateFormatter), dataFont));
+                    dataCell.setPadding(4); dataCell.setVerticalAlignment(Element.ALIGN_MIDDLE); table.addCell(dataCell);
+
+                    // Description
+                    dataCell = new PdfPCell(new Phrase(tx.getDescription() != null ? tx.getDescription() : "-", dataFont));
+                    dataCell.setPadding(4); dataCell.setVerticalAlignment(Element.ALIGN_MIDDLE); table.addCell(dataCell);
+
+                    // Type
+                    dataCell = new PdfPCell(new Phrase(tx.getType() != null ? tx.getType().replace("_", " ") : "-", dataFont)); // Replace underscore for readability
+                    dataCell.setPadding(4); dataCell.setHorizontalAlignment(Element.ALIGN_CENTER); dataCell.setVerticalAlignment(Element.ALIGN_MIDDLE); table.addCell(dataCell);
+
+                    // Amount (with color coding)
+                    Font amountFont = new Font(dataFont);
+                    String amountStr = String.format("%.2f", tx.getBalance()); // Balance holds the transaction amount here
+                    if (tx.getType() != null && (tx.getType().contains("IN") || tx.getType().contains("DEPOSIT"))) {
+                        amountFont.setColor(creditColor);
+                        amountStr = "+ " + amountStr;
+                    } else if (tx.getType() != null && (tx.getType().contains("OUT") || tx.getType().contains("WITHDRAW"))) {
+                        amountFont.setColor(debitColor);
+                        amountStr = "- " + amountStr;
+                    }
+                    dataCell = new PdfPCell(new Phrase(amountStr, amountFont));
+                    dataCell.setPadding(4); dataCell.setHorizontalAlignment(Element.ALIGN_RIGHT); dataCell.setVerticalAlignment(Element.ALIGN_MIDDLE); table.addCell(dataCell);
+
+
+                    // Details / Counterparty
+                    String details = "-";
+                    if ("TRANSFER_OUT".equals(tx.getType())) {
+                        details = "To: " + (tx.getRecipientAccountNumber() != null ? tx.getRecipientAccountNumber() : "N/A");
+                    } else if ("TRANSFER_IN".equals(tx.getType())) {
+                        details = "From: " + (tx.getSenderAccountNumber() != null ? tx.getSenderAccountNumber() : "N/A");
+                    } else if ("DEPOSIT".equals(tx.getType())) {
+                        details = "Self Deposit"; // Example
+                    } else if ("WITHDRAWAL".equals(tx.getType())) {
+                        details = "Self Withdrawal"; // Example
+                    }
+                    dataCell = new PdfPCell(new Phrase(details, dataFont));
+                    dataCell.setPadding(4); dataCell.setVerticalAlignment(Element.ALIGN_MIDDLE); table.addCell(dataCell);
+                }
+                document.add(table);
+            }
+
+            // Footer
+            Paragraph footer = new Paragraph(
+                    "Report generated on: " + LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd-MMM-yyyy HH:mm:ss")) +
+                            " | This is a computer-generated statement and requires no signature.",
+                    footerFont
+            );
+            footer.setAlignment(Element.ALIGN_CENTER);
+            footer.setSpacingBefore(15f);
+            document.add(footer);
+
+        } catch (DocumentException e) {
+            log.error("Error during PDF document generation for customer {}: {}", customerId, e.getMessage(), e);
+            throw new Exception("Error generating PDF document.", e); // Re-throw as a checked exception or specific runtime exception
+        } finally {
+            if (document.isOpen()) {
+                document.close(); // Essential to finalize the PDF
+            }
+        }
+        log.info("Successfully generated PDF byte array for customer {}", customerId);
+        return baos.toByteArray();
+    }
+
+    // Keep getBalance method as is
+    // ...
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+--- main\resources\application.properties ---
+spring.jpa.hibernate.ddl-auto=update 
+spring.datasource.url=jdbc:mysql://localhost:3306/banking_somnath
+spring.datasource.username=root
+spring.datasource.password=$@Mewo@7718
+spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+spring.jpa.show-sql=true
+org.springframework.web=DEBUG 
+org.springframework.security=DEBUG
+org.apache.coyote.http11=DEBUG
+logging.level.org.springframework.security=DEBUG
+
+
+
+--- test\java\com\Banking_Somnath\banking_systemn\BankingSystemnApplicationTests.java ---
+package com.Banking_Somnath.banking_systemn;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class 	BankingSystemnApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+

@@ -1,0 +1,55 @@
+.transfer-container {
+    background-color: black;
+    color: red;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  h2 {
+    margin-bottom: 20px;
+    font-size: 24px;
+  }
+  
+  form {
+    display: flex;
+    flex-direction: column;
+    width: 300px;
+  }
+  
+  input {
+    margin-bottom: 15px;
+    padding: 10px;
+    border: 2px solid red;
+    border-radius: 5px;
+    background-color: black;
+    color: red;
+  }
+  
+  input::placeholder {
+    color: rgba(255, 0, 0, 0.7);
+  }
+  
+  button {
+    padding: 10px;
+    background-color: red;
+    color: black;
+    border: none;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  
+  button:hover {
+    background-color: darkred;
+  }
+  
+  .transfer-message {
+    margin-top: 20px;
+    font-size: 18px;
+    color: red;
+  }
+  
